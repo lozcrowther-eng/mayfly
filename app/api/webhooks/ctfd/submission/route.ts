@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { hookToken, lifecycleHook } from "@/app/workflows/instance-lifecycle";
 import { SubmissionWebhookSchema } from "@/lib/api/schemas";
 import { findRunningInstance } from "@/lib/api/run-lookup";
+import { ctfdClient } from "@/lib/clients";
 import { readVerifiedBody, requireSigningSecret, SignedRequestError } from "@/lib/http/signed-request";
 
 export async function POST(request: Request) {
@@ -23,11 +24,12 @@ export async function POST(request: Request) {
 
   const { challengeId, teamId, correct } = parsed.data;
 
-  // Every submission changes the scoreboard, correct or not. "max" purges it outright rather
-  // than waiting out a cacheLife profile's stale window — Next.js 16 requires this second arg.
-  revalidateTag("scoreboard", "max");
-
   if (correct) {
+    // Real mode: a no-op, CTFd already owns this score (see CtfdClient.recordSolve). Fake
+    // mode: the only place the fake scoreboard's data comes from. Written before the
+    // revalidation below so the next request's cache miss reads the score that caused it.
+    await ctfdClient.recordSolve(challengeId, teamId);
+
     // CTFd knows the challenge and team, not our runId — this reverse lookup exists because
     // "one sandbox per team per challenge" (CLAUDE.md) makes it well-defined.
     const identity = await findRunningInstance(challengeId, teamId);
@@ -35,6 +37,15 @@ export async function POST(request: Request) {
       await lifecycleHook.resume(hookToken(identity), { reason: "solved" });
     }
   }
+
+  // Every submission changes the scoreboard, correct or not. This call happens from a Route
+  // Handler, not a Server Action, so updateTag's synchronous same-request refresh isn't
+  // available here — { expire: 0 } is next.js's documented replacement for that case: it
+  // forces the *next* request to block on a fresh fetch instead of serving stale content
+  // for up to a year (which is what the "max" profile would do). A slight staleness window
+  // would be a fine tradeoff for a real leaderboard; it's wrong for a webhook whose entire
+  // job is "this just changed."
+  revalidateTag("scoreboard", { expire: 0 });
 
   return NextResponse.json({ ok: true });
 }

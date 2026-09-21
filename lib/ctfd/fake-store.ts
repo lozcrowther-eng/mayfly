@@ -3,6 +3,7 @@
  * /api/fake-ctfd/* route handlers read and write this store, so /debug shows exactly what
  * "CTFd" received regardless of whether the call came from a workflow step or a manual curl.
  */
+import { CHALLENGES } from "../fixtures/challenges";
 
 type InstanceKey = { challengeId: string; teamId: string; runId: string };
 
@@ -22,9 +23,18 @@ interface FakeInstanceRecord {
   reaped: boolean;
 }
 
+export interface FakeScoreEntry {
+  teamId: string;
+  score: number;
+  solvedChallengeIds: string[];
+}
+
 interface FakeCtfdState {
   records: Map<string, FakeInstanceRecord>;
   events: FakeCtfdEvent[];
+  // teamId -> solved challengeIds. Populated by the submission webhook, read by
+  // fakeScoreboard() — this is the fake stand-in for CTFd's own scores table.
+  solves: Map<string, Set<string>>;
 }
 
 // Next.js compiles each route handler and page as a separate bundle, so a plain module-level
@@ -34,7 +44,7 @@ const GLOBAL_KEY = Symbol.for("mayfly.fakeCtfdStore");
 
 function state(): FakeCtfdState {
   const g = globalThis as unknown as Record<symbol, FakeCtfdState | undefined>;
-  return (g[GLOBAL_KEY] ??= { records: new Map(), events: [] });
+  return (g[GLOBAL_KEY] ??= { records: new Map(), events: [], solves: new Map() });
 }
 
 function key(instance: InstanceKey): string {
@@ -84,4 +94,30 @@ export function fakeCtfdEvents(): FakeCtfdEvent[] {
 /** Read-only snapshot for the polling endpoint — null until mintFlag has run for this instance. */
 export function fakeInstanceStatus(instance: InstanceKey): FakeInstanceRecord | null {
   return state().records.get(key(instance)) ?? null;
+}
+
+/** Called by the submission webhook on a correct submission — see CtfdClient.recordSolve. */
+export function fakeRecordSolve(challengeId: string, teamId: string): void {
+  const solves = state().solves;
+  const solved = solves.get(teamId) ?? new Set<string>();
+  solved.add(challengeId);
+  solves.set(teamId, solved);
+}
+
+/**
+ * Scores every team with at least one solve, using each challenge's fixed point value
+ * (lib/fixtures/challenges.ts) — the same shape CTFd's own scoreboard API returns, but
+ * computed locally instead of over a network call. Sorted highest first, ties broken by
+ * teamId for a stable render.
+ */
+export function fakeScoreboard(): FakeScoreEntry[] {
+  const pointsById = new Map(CHALLENGES.map((c) => [c.id, c.points]));
+
+  return [...state().solves.entries()]
+    .map(([teamId, solved]) => ({
+      teamId,
+      solvedChallengeIds: [...solved],
+      score: [...solved].reduce((sum, id) => sum + (pointsById.get(id) ?? 0), 0),
+    }))
+    .sort((a, b) => b.score - a.score || a.teamId.localeCompare(b.teamId));
 }

@@ -1,9 +1,15 @@
+import { connection } from "next/server";
 import { fakeCtfdEvents } from "@/lib/ctfd/fake-store";
 
-// Reads live in-memory state on every request — never statically cache this page.
-export const dynamic = "force-dynamic";
+// Reads live in-memory state on every request. `await connection()` is what actually forces
+// that under Cache Components — force-dynamic is gone, and without a dynamic API in the
+// render path this would otherwise prerender once at build time and freeze the event list.
+// No static shell worth prerendering either, so this also opts out of the instant-navigation
+// requirement rather than carving out a Suspense boundary for content that's all dynamic.
+export const instant = false;
 
-export default function DebugPage() {
+export default async function DebugPage() {
+  await connection();
   const ctfdMode = process.env.CTFD_MODE;
   const events = ctfdMode === "fake" ? fakeCtfdEvents() : [];
 

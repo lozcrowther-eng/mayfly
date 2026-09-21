@@ -5,8 +5,8 @@ import { estimateCost } from "@/lib/pricing";
 
 const DEFAULT_GLOBAL_CONCURRENCY_CAP = 8;
 
-export const dynamic = "force-dynamic";
-
+// Reads live workflow-run state on every request — with Cache Components, that's the
+// default for anything without a "use cache" boundary, so there's nothing to opt into here.
 export async function GET() {
   const globalCap = Number(process.env.SANDBOX_MAX_CONCURRENT ?? DEFAULT_GLOBAL_CONCURRENCY_CAP);
   const [liveRows, failures] = await Promise.all([listLiveInstances(), listRecentFailures()]);
