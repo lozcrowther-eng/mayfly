@@ -1,0 +1,26 @@
+[
+  {
+    "payload": "{\"challengeId\":\"pwn-1\",\"teamId\":\"team-42\",\"runId\":\"r1\"}",
+    "secret": "test-secret-alpha",
+    "timestampMs": 1700000000000,
+    "signature": "db392e0ff52d82d975fa42c0b78db2fb325e0a9d0dfc86726713a29dda6be035"
+  },
+  {
+    "payload": "",
+    "secret": "test-secret-beta",
+    "timestampMs": 1700000000001,
+    "signature": "f82b3a458ed5156001648fac84455e4c6f6ce7a3c4b1f73c8906e924f23304ef"
+  },
+  {
+    "payload": "{\"event\":\"reaped\",\"runId\":\"r2\",\"note\":\"unicode: café 🔥\"}",
+    "secret": "test-secret-gamma",
+    "timestampMs": 1735689600000,
+    "signature": "7916809af82cf88ee16fe1e8d15aeae3404eed38c1b53143c181ba206e35f13f"
+  },
+  {
+    "payload": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "secret": "test-secret-delta",
+    "timestampMs": 946684800000,
+    "signature": "fc82d35d4e9b617c504affb8cb50f6b0159323c3303157ee86bb92e31b6dffd8"
+  }
+]
