@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CapBanner } from "@/components/admin/cap-banner";
 import { InstancesTable, type AdminRow } from "@/components/admin/instances-table";
+import { RecentFailures, type FailureRow } from "@/components/admin/recent-failures";
 import { StatCard } from "@/components/admin/stat-card";
 
 const POLL_INTERVAL_MS = 3000;
@@ -14,6 +15,7 @@ interface AdminSnapshot {
   estimatedSpendUsd: number;
   capHit: boolean;
   rows: AdminRow[];
+  failures: FailureRow[];
 }
 
 export function AdminDashboard() {
@@ -62,6 +64,8 @@ export function AdminDashboard() {
       <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-4">
         <InstancesTable rows={snapshot?.rows ?? []} onKilled={refresh} />
       </div>
+
+      <RecentFailures failures={snapshot?.failures ?? []} />
     </div>
   );
 }

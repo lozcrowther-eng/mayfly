@@ -1,0 +1,6 @@
+{
+  "name": "nothing-listening",
+  "expectedCause": "nothing-listening",
+  "expectedRetryable": false,
+  "bootOutput": "\nHTTP_STATUS:000\nCURL_EXIT:7\n[boot] starting static-web on port 8080\n[boot] config loaded from /etc/static-web/config.yaml\n[boot] initialization complete\n"
+}

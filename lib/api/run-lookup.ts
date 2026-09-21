@@ -1,5 +1,5 @@
 import { getRun } from "workflow/api";
-import type { PublishedStatus } from "@/lib/types";
+import type { PublishedStatus, PublishedTriage } from "@/lib/types";
 
 /**
  * Reads back what the workflow itself published to its run's stream (see
@@ -188,6 +188,48 @@ export async function listLiveInstances(): Promise<LiveInstanceRow[]> {
 
     if (!next) break;
     cursor = next;
+  }
+
+  return rows;
+}
+
+export interface FailedInstanceRow {
+  runId: string;
+  challengeId: string | null;
+  teamId: string | null;
+  failedAt: string; // ISO 8601
+  triage: PublishedTriage | null;
+}
+
+/**
+ * Recent, terminal runs — kept separate from listLiveInstances() rather than merged into
+ * one table: a failed run isn't accruing cost anymore, so it has no place in a listing
+ * whose header stats (active CPU-hours, estimated spend) are meant to describe currently-
+ * billable resources. A run's stream stays readable after it completes (streams are part
+ * of the durable event log, not tied to the workflow still executing), so the same
+ * readLatestStatus() this file uses everywhere else works unchanged here.
+ */
+export async function listRecentFailures(limit = 20): Promise<FailedInstanceRow[]> {
+  const { getWorld } = await import("workflow/runtime");
+  const world = getWorld();
+
+  const { data } = await world.runs.list({
+    workflowName: "workflow//./app/workflows/instance-lifecycle//instanceLifecycle",
+    status: "failed",
+    pagination: { limit },
+    resolveData: "none",
+  });
+
+  const rows: FailedInstanceRow[] = [];
+  for (const run of data) {
+    const status = await readLatestStatus(run.runId);
+    rows.push({
+      runId: run.runId,
+      challengeId: status?.challengeId ?? null,
+      teamId: status?.teamId ?? null,
+      failedAt: new Date(run.completedAt ?? run.updatedAt).toISOString(),
+      triage: status?.triage ?? null,
+    });
   }
 
   return rows;

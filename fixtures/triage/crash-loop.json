@@ -1,0 +1,6 @@
+{
+  "name": "crash-loop",
+  "expectedCause": "crash-loop",
+  "expectedRetryable": false,
+  "bootOutput": "\nHTTP_STATUS:000\nCURL_EXIT:7\n[boot] starting juice-shop on port 3000\nnode:internal/process/promises:391\nTypeError: Cannot read properties of undefined (reading 'findAll')\n    at ProductController.list (/app/routes/products.js:14:23)\nProcess exited with code 1\n[boot] restarting (attempt 2)...\n[boot] starting juice-shop on port 3000\nTypeError: Cannot read properties of undefined (reading 'findAll')\n    at ProductController.list (/app/routes/products.js:14:23)\nProcess exited with code 1\n[boot] restarting (attempt 3)...\n[boot] starting juice-shop on port 3000\nTypeError: Cannot read properties of undefined (reading 'findAll')\n    at ProductController.list (/app/routes/products.js:14:23)\nProcess exited with code 1\n[boot] restarting (attempt 4)...\n"
+}

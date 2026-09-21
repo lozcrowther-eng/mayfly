@@ -1,0 +1,7 @@
+{
+  "name": "healthcheck-500",
+  "expectedCause": "healthcheck-500",
+  "expectedRetryable": true,
+  "note": "CURL_EXIT:22, not :7 — curl's -f flag treats a 4xx/5xx HTTP response as a request failure (exit 22), distinct from the connection-level failures (exit 7) in the other fixtures. That distinction is the whole point of this fixture: the server is reachable, it just errored.",
+  "bootOutput": "\nHTTP_STATUS:500\nCURL_EXIT:22\n[boot] starting juice-shop on port 3000\n[boot] Serving HTTP on 0.0.0.0 port 3000\n[request] GET / -> 500 Internal Server Error\nError: connect ECONNREFUSED 127.0.0.1:6379 (redis)\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1595:16)\n"
+}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { listLiveInstances } from "@/lib/api/run-lookup";
+import { listLiveInstances, listRecentFailures } from "@/lib/api/run-lookup";
 import { getChallenge } from "@/lib/fixtures/challenges";
 import { estimateCost } from "@/lib/pricing";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const globalCap = Number(process.env.SANDBOX_MAX_CONCURRENT ?? DEFAULT_GLOBAL_CONCURRENCY_CAP);
-  const liveRows = await listLiveInstances();
+  const [liveRows, failures] = await Promise.all([listLiveInstances(), listRecentFailures()]);
   const now = Date.now();
 
   const rows = liveRows.map((row) => {
@@ -41,5 +41,6 @@ export async function GET() {
     estimatedSpendUsd,
     capHit: rows.length >= globalCap,
     rows,
+    failures,
   });
 }

@@ -1,0 +1,6 @@
+{
+  "name": "slow-boot",
+  "expectedCause": "slow-boot",
+  "expectedRetryable": true,
+  "bootOutput": "\nHTTP_STATUS:000\nCURL_EXIT:7\n[boot] starting juice-shop on port 3000\n[boot] running database migrations (12 pending)...\n[boot] migration 0001_initial... done\n[boot] migration 0002_add_products... done\n[boot] migration 0003_add_users... done\n[boot] migration 0004_add_baskets... in progress\n"
+}

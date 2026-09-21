@@ -1,0 +1,6 @@
+{
+  "name": "missing-env-var",
+  "expectedCause": "missing-env-var",
+  "expectedRetryable": false,
+  "bootOutput": "\nHTTP_STATUS:000\nCURL_EXIT:7\n[boot] Starting vuln-api...\n/app/node_modules/dotenv-safe/index.js:38\n  throw new MissingEnvVarsError(...)\n        ^\nMissingEnvVarsError: The following variables were defined in .env.example but are not present in the environment:\n  DATABASE_URL\nMake sure to add them to .env or directly to the environment.\n    at checkForMissingVars (/app/node_modules/dotenv-safe/index.js:38:11)\n    at Object.config (/app/node_modules/dotenv-safe/index.js:64:3)\n    at Object.<anonymous> (/app/server.js:3:15)\nnode:internal/modules/cjs/loader:1163\nProcess exited with code 1\n"
+}

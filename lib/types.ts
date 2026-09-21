@@ -30,6 +30,18 @@ export interface InstanceRequest extends LaunchInput {
   runId: string;
 }
 
+/**
+ * The shape of lib/triage.ts's Triage, duplicated rather than imported so this
+ * dependency-free base types module doesn't pull in `ai`/`zod` for everything that
+ * imports it just to read a run's published state.
+ */
+export interface PublishedTriage {
+  cause: string;
+  remediation: string;
+  retryable: boolean;
+  confidence: number;
+}
+
 /** What the workflow publishes to its run's own stream — see app/workflows/instance-lifecycle.ts. */
 export interface PublishedStatus {
   challengeId: string;
@@ -40,6 +52,8 @@ export interface PublishedStatus {
   logs?: string;
   /** ISO 8601 — when the current active window ends and the workflow re-enters "expiring". Set on "healthy"/"expiring", null otherwise. */
   expiresAt?: string | null;
+  /** Populated only when a health-check exhaustion went through AI triage — see app/workflows/instance-lifecycle.ts. */
+  triage?: PublishedTriage;
 }
 
 export interface InstanceFailure {

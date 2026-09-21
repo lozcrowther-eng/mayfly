@@ -24,5 +24,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ run
     state: status.state,
     url: status.url,
     logs: status.logs ?? null,
+    triage: status.triage ?? null,
   });
 }

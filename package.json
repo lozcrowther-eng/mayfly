@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "launch": "tsx --env-file=.env.local scripts/launch.ts"
+    "launch": "tsx --env-file=.env.local scripts/launch.ts",
+    "eval:triage": "tsx --env-file=.env.local scripts/eval-triage.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

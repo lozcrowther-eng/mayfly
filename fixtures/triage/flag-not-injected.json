@@ -1,0 +1,6 @@
+{
+  "name": "flag-not-injected",
+  "expectedCause": "flag-not-injected",
+  "expectedRetryable": false,
+  "bootOutput": "\nHTTP_STATUS:000\nCURL_EXIT:7\n[boot] starting vuln-api on port 8080\n[boot] FATAL: environment variable FLAG is required but was empty or unset\n[boot] refusing to start without a flag configured — exiting\nProcess exited with code 1\n"
+}

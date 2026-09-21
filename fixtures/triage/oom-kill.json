@@ -1,0 +1,6 @@
+{
+  "name": "oom-kill",
+  "expectedCause": "oom-kill",
+  "expectedRetryable": false,
+  "bootOutput": "\nHTTP_STATUS:000\nCURL_EXIT:7\n[boot] starting juice-shop on port 3000\n[boot] loading product catalog into memory...\n[boot] warming cache (this may take a moment)\n[   45.128123] Out of memory: Killed process 214 (node) total-vm:4218212kB, anon-rss:2093412kB, file-rss:0kB, shmem-rss:0kB, UID:1000 pgtables:4396kB oom_score_adj:0\n[   45.129501] oom_reaper: reaped process 214 (node), now anon-rss:0kB, file-rss:0kB, shmem-rss:0kB\n"
+}

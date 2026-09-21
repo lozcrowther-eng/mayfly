@@ -1,0 +1,6 @@
+{
+  "name": "bad-entrypoint",
+  "expectedCause": "bad-entrypoint",
+  "expectedRetryable": false,
+  "bootOutput": "\nHTTP_STATUS:000\nCURL_EXIT:7\nbash: line 1: /start.sh: cannot execute: required file not found\n"
+}

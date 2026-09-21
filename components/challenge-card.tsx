@@ -9,7 +9,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state";
 import { EXTEND_SECONDS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { Challenge } from "@/lib/fixtures/challenges";
-import type { InstanceState } from "@/lib/types";
+import type { InstanceState, PublishedTriage } from "@/lib/types";
 
 // 30 min, not the CLI's 1h default — RealSandboxClient adds a 300s grace buffer on top of
 // this (lib/sandbox/real-client.ts's GRACE_SECONDS), and Vercel Hobby plans cap sandbox
@@ -23,6 +23,7 @@ interface PolledInstance {
   state: InstanceState;
   url: string | null;
   logs: string | null;
+  triage: PublishedTriage | null;
 }
 
 interface TrackedLaunch {
@@ -197,9 +198,20 @@ export function ChallengeCard({ challenge, teamId }: { challenge: Challenge; tea
       )}
 
       {showTriage && (
-        <div className="mt-1 flex flex-col rounded-md border border-dashed border-red-900/50 bg-red-950/10">
-          {status?.logs ? (
-            <pre className="max-h-40 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-red-300/80">
+        <div className="mt-1 flex flex-col gap-3 rounded-md border border-dashed border-red-900/50 bg-red-950/10 p-3">
+          {status?.triage ? (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-[11px] tracking-widest text-red-400/70">AI TRIAGE</span>
+                <span className="font-mono text-[11px] tabular-nums text-red-400/50">
+                  {Math.round(status.triage.confidence * 100)}% confidence
+                </span>
+              </div>
+              <p className="font-mono text-xs leading-relaxed text-red-200">{status.triage.cause}</p>
+              <p className="font-mono text-[11px] leading-relaxed text-red-300/70">→ {status.triage.remediation}</p>
+            </>
+          ) : status?.logs ? (
+            <pre className="max-h-40 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-red-300/80">
               {status.logs}
             </pre>
           ) : (

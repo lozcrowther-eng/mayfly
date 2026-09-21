@@ -1,0 +1,7 @@
+{
+  "name": "port-mismatch",
+  "expectedCause": "port-mismatch",
+  "expectedRetryable": false,
+  "note": "The curl/CURL_EXIT lines are a real capture from a genuine Vercel Sandbox: a server bound to port 3000 while health-checked on 9999, reproducing exactly what RealSandboxClient.healthUrl (lib/sandbox/real-client.ts) actually captures for this failure mode.",
+  "bootOutput": "\nHTTP_STATUS:000\nCURL_EXIT:7\n[boot] Serving HTTP on 0.0.0.0 port 3000 (http://0.0.0.0:3000/) ...\n"
+}

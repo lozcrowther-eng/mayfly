@@ -2,7 +2,8 @@ import { FatalError, RetryableError, defineHook, getWorkflowMetadata, getWritabl
 import { AdmissionDeniedError, admit } from "@/lib/admission";
 import { ctfdClient, sandboxClient } from "@/lib/clients";
 import { EXTEND_SECONDS } from "@/lib/constants";
-import type { InstanceRequest, InstanceState, LaunchInput, PublishedStatus } from "@/lib/types";
+import { triageBootFailure } from "@/lib/triage";
+import type { InstanceRequest, InstanceState, LaunchInput, PublishedStatus, PublishedTriage } from "@/lib/types";
 
 const TEAM_CONCURRENCY_CAP = 2;
 const DEFAULT_GLOBAL_CONCURRENCY_CAP = 8;
@@ -47,7 +48,7 @@ async function publishStatus(
   request: InstanceRequest,
   state: InstanceState,
   url: string | null,
-  opts?: { logs?: string; expiresAt?: string | null },
+  opts?: { logs?: string; expiresAt?: string | null; triage?: PublishedTriage },
 ): Promise<void> {
   "use step";
 
@@ -58,6 +59,7 @@ async function publishStatus(
     url,
     logs: opts?.logs,
     expiresAt: opts?.expiresAt ?? null,
+    triage: opts?.triage,
   };
   const writer = getWritable<PublishedStatus>().getWriter();
   try {
@@ -111,18 +113,34 @@ async function extendInstance(request: InstanceRequest, extraSeconds: number): P
 }
 
 /**
- * Reads whatever the sandbox logged before things went wrong — CLAUDE.md names this
- * `triageFailure` and ties it to "the detached command handle." That handle is a live
- * object from the createSandbox step's own invocation; it cannot cross into this, a later
- * and separate step invocation. What *does* cross that boundary is the durable log file on
- * the sandbox's own filesystem (LOG_PATH in real-client.ts) that the detached command was
- * launched with its output redirected into — readLogs() re-fetches the sandbox by its
- * deterministic name and reads that file, which is the cross-invocation-safe equivalent of
- * "keeping a reference" in an execution model where steps don't share memory.
+ * Reads whatever the sandbox logged before things went wrong. "The detached command
+ * handle," per CLAUDE.md's phrasing, is a live object from the createSandbox step's own
+ * invocation; it cannot cross into this, a later and separate step invocation. What *does*
+ * cross that boundary is the durable log file on the sandbox's own filesystem (LOG_PATH in
+ * real-client.ts) that the detached command was launched with its output redirected into —
+ * readLogs() re-fetches the sandbox by its deterministic name and reads that file, which is
+ * the cross-invocation-safe equivalent of "keeping a reference" in an execution model where
+ * steps don't share memory. Used both as the raw log fallback for non-health-check failures
+ * and as the AI triage's input for health-check exhaustion (see triageHealthCheckFailure).
  */
-async function triageFailure(request: InstanceRequest): Promise<string> {
+async function captureBootOutput(request: InstanceRequest): Promise<string> {
   "use step";
   return sandboxClient.readLogs(request).catch(() => "");
+}
+
+/**
+ * Only called after waitForHealthy's own step-level retries are exhausted (the default 3
+ * retries backing off on RetryableError) — a sustained failure, not a boot-time blip, so
+ * it's worth spending an LLM call on. One step, not two: the boot output and the triage of
+ * it are always needed together, and bundling them means the eval script
+ * (scripts/eval-triage.ts) exercises the exact same triageBootFailure() this step calls,
+ * just without the sandbox-log read in front of it.
+ */
+async function triageHealthCheckFailure(request: InstanceRequest): Promise<{ logs: string; triage: PublishedTriage }> {
+  "use step";
+  const logs = await sandboxClient.readLogs(request).catch(() => "");
+  const triage = await triageBootFailure(logs);
+  return { logs, triage };
 }
 
 async function reap(request: InstanceRequest): Promise<void> {
@@ -147,6 +165,7 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
   let url: string | null = null;
   let terminalState: "reaped" | "failed" = "reaped";
   let logs: string | undefined;
+  let triage: PublishedTriage | undefined;
 
   try {
     // Inside the try, not before it: an admission rejection is a real terminal outcome
@@ -158,7 +177,31 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
     await publishStatus(request, "provisioning", null);
 
     url = await createSandbox(request, flag);
-    await waitForHealthy(request);
+
+    // Two attempts at most: waitForHealthy's own step-level retries (RetryableError, ~3
+    // backoffs) already absorb ordinary boot-time races. Reaching this loop at all means
+    // those were exhausted — a sustained failure worth spending an LLM call to diagnose,
+    // and worth one full createSandbox retry only if the AI triage itself says the boot
+    // output looks transient. Anything it calls non-retryable, or a second exhaustion,
+    // fails for good.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await waitForHealthy(request);
+        break;
+      } catch {
+        const result = await triageHealthCheckFailure(request);
+        logs = result.logs;
+        triage = result.triage;
+
+        if (attempt === 1 && triage.retryable) {
+          url = await createSandbox(request, flag);
+          continue;
+        }
+
+        throw new FatalError(`health check failed: ${triage.cause}`);
+      }
+    }
+
     await publishReady(request, url);
 
     // This replaces a Kubernetes reaper CronJob. There is no external process that has to
@@ -203,12 +246,15 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
     }
   } catch (error) {
     terminalState = "failed";
-    logs = await triageFailure(request);
+    // Only for failures that never went through triageHealthCheckFailure (admission
+    // rejection, mintFlag failure, a hook-loop error) — that path already captured logs
+    // (and an AI triage) itself, so this would otherwise be a redundant second log read.
+    if (logs === undefined) logs = await captureBootOutput(request);
     url = null;
     throw error;
   } finally {
     // Runs on every exit: the happy path above, an early return, or any step throwing.
-    await publishStatus(request, terminalState, url, { logs });
+    await publishStatus(request, terminalState, url, { logs, triage });
     await reap(request);
   }
 }

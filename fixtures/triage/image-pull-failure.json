@@ -1,0 +1,6 @@
+{
+  "name": "image-pull-failure",
+  "expectedCause": "image-pull-failure",
+  "expectedRetryable": true,
+  "bootOutput": "\nHTTP_STATUS:000\nCURL_EXIT:7\n[compose] Pulling api (registry.internal.example/vuln-api:latest)...\nError response from daemon: Get \"https://registry.internal.example/v2/vuln-api/manifests/latest\": dial tcp 10.0.4.12:443: i/o timeout\ndocker compose up: failed to pull image: exit status 1\n"
+}
