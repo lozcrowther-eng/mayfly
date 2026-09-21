@@ -1,21 +1,15 @@
 import { NextResponse } from "next/server";
 import { launchInstance, UnknownChallengeError } from "@/lib/api/launch";
 import { LaunchRequestSchema } from "@/lib/api/schemas";
-import { readVerifiedBody, requireSigningSecret, SignedRequestError } from "@/lib/http/signed-request";
 
-/** The CTFd plugin's launch contract — HMAC-signed (see CLAUDE.md). Player-browser launches use /api/launch instead. */
+/**
+ * Same-origin browser launches from the player view (app/page.tsx) — no HMAC signature,
+ * unlike /api/instances. That signing contract exists specifically for the CTFd-plugin<
+ * ->Vercel boundary (see CLAUDE.md); a browser has no secret it could hold to sign with
+ * that wouldn't also be readable by every player who opened devtools.
+ */
 export async function POST(request: Request) {
-  let rawBody: string;
-  try {
-    rawBody = await readVerifiedBody(request, requireSigningSecret());
-  } catch (error) {
-    if (error instanceof SignedRequestError) {
-      return NextResponse.json({ error: error.message }, { status: 401 });
-    }
-    throw error;
-  }
-
-  const parsed = LaunchRequestSchema.safeParse(JSON.parse(rawBody));
+  const parsed = LaunchRequestSchema.safeParse(await request.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }

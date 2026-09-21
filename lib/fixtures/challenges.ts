@@ -8,6 +8,8 @@ export interface Challenge {
   ports: number[];
   /** Runs multiple processes/services inside its one sandbox (still one sandbox per team per challenge). */
   compose?: boolean;
+  /** Shared-tier only — a fixed URL, not a per-run sandbox domain, so there's nothing to launch. */
+  url?: string;
 }
 
 /**
@@ -24,7 +26,7 @@ export const CHALLENGES: Challenge[] = [
   // retries exhausting, reap still firing in `finally`) end to end against the fakes.
   { id: "broken-web", name: "Broken Web", tier: "instanced", ports: [3000] },
   { id: "vuln-api", name: "Vulnerable API", tier: "instanced", ports: [8080], compose: true },
-  { id: "static-web", name: "Static Web", tier: "shared", ports: [8080] },
+  { id: "static-web", name: "Static Web", tier: "shared", ports: [8080], url: "https://static-web.mayfly.example" },
 ];
 
 export function getChallenge(id: string): Challenge | undefined {
