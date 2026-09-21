@@ -2,8 +2,8 @@ import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { hookToken, lifecycleHook } from "@/app/workflows/instance-lifecycle";
 import { SubmissionWebhookSchema } from "@/lib/api/schemas";
+import { findRunningInstance } from "@/lib/api/run-lookup";
 import { readVerifiedBody, requireSigningSecret, SignedRequestError } from "@/lib/http/signed-request";
-import { getRunRecordByChallengeTeam } from "@/lib/runs";
 
 export async function POST(request: Request) {
   let rawBody: string;
@@ -30,9 +30,9 @@ export async function POST(request: Request) {
   if (correct) {
     // CTFd knows the challenge and team, not our runId — this reverse lookup exists because
     // "one sandbox per team per challenge" (CLAUDE.md) makes it well-defined.
-    const record = getRunRecordByChallengeTeam(challengeId, teamId);
-    if (record) {
-      await lifecycleHook.resume(hookToken(record.request), { reason: "solved" });
+    const identity = await findRunningInstance(challengeId, teamId);
+    if (identity) {
+      await lifecycleHook.resume(hookToken(identity), { reason: "solved" });
     }
   }
 

@@ -1,47 +1,27 @@
 import { NextResponse } from "next/server";
 import { getRun } from "workflow/api";
-import { fakeInstanceStatus } from "@/lib/ctfd/fake-store";
-import { getRunRecord } from "@/lib/runs";
-import type { InstanceState } from "@/lib/types";
+import { getLatestStatus } from "@/lib/api/run-lookup";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
 
-  const record = getRunRecord(runId);
-  if (!record) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
-
-  const run = getRun(record.sdkRunId);
+  const run = getRun(runId);
   if (!(await run.exists)) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  // The SDK only tracks coarse workflow status (running/completed/failed). CTFD_MODE=fake's
-  // store gives us the finer-grained signal (minted vs. published) needed to distinguish
-  // 'queued' / 'provisioning' / 'healthy' while the run is still 'running'. A real deployment
-  // would get this detail from CTFd's own API instead — not a new stateful system.
-  const status = await run.status;
-  const ctfd = process.env.CTFD_MODE === "fake" ? fakeInstanceStatus(record.request) : null;
-
-  let state: InstanceState;
-  if (status === "failed") {
-    state = "failed";
-  } else if (status === "completed") {
-    state = "reaped";
-  } else if (ctfd?.url) {
-    state = "healthy";
-  } else if (ctfd) {
-    state = "provisioning";
-  } else {
-    state = "queued";
+  // Reads the run's own stream — see lib/api/run-lookup.ts — so this is correct regardless
+  // of which serverless instance handles this request vs. the one that ran the workflow step.
+  const status = await getLatestStatus(runId);
+  if (!status) {
+    return NextResponse.json({ runId, challengeId: null, teamId: null, state: "queued", url: null });
   }
 
   return NextResponse.json({
     runId,
-    challengeId: record.request.challengeId,
-    teamId: record.request.teamId,
-    state,
-    url: ctfd?.url ?? null,
+    challengeId: status.challengeId,
+    teamId: status.teamId,
+    state: status.state,
+    url: status.url,
   });
 }

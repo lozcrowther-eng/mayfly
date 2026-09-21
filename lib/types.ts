@@ -8,17 +8,26 @@ export type InstanceState =
   | "failed";
 
 /**
+ * What the launch endpoint knows before a workflow run exists. runId isn't part of this —
+ * it doesn't exist yet; start() assigns it, and the workflow resolves it via
+ * getWorkflowMetadata() (see app/workflows/instance-lifecycle.ts) rather than the caller
+ * inventing one, so there's exactly one source of truth for the run's identity.
+ */
+export interface LaunchInput {
+  challengeId: string;
+  teamId: string;
+  ttlSeconds: number;
+  /** Ports the challenge listens on, resolved from lib/fixtures/challenges.ts at launch time. */
+  ports: number[];
+}
+
+/**
  * Identifies one player-facing challenge instance. challengeId + teamId + runId
  * together form the Sandbox name (`${challengeId}-${teamId}-${runId}`, see CLAUDE.md) —
  * reusing a name resumes a previous player's box, so runId must be fresh per launch.
  */
-export interface InstanceRequest {
-  challengeId: string;
-  teamId: string;
+export interface InstanceRequest extends LaunchInput {
   runId: string;
-  ttlSeconds: number;
-  /** Ports the challenge listens on, resolved from lib/fixtures/challenges.ts at launch time. */
-  ports: number[];
 }
 
 export interface InstanceFailure {

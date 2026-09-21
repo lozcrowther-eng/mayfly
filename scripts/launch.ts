@@ -5,6 +5,14 @@ const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_TTL_SECONDS = 3600;
 
+// Not part of the CTFd plugin's contract — Vercel's own Deployment Protection sits in front
+// of preview URLs, orthogonal to mayfly's HMAC auth below. This lets `pnpm launch` reach a
+// protected preview from local dev; the real CTFd plugin talks to production, which isn't
+// behind this wall.
+const VERCEL_BYPASS_HEADERS: Record<string, string> = process.env.VERCEL_OIDC_TOKEN
+  ? { "x-vercel-trusted-oidc-idp-token": process.env.VERCEL_OIDC_TOKEN }
+  : {};
+
 function usage(): never {
   console.error("Usage: pnpm launch <challengeId> <teamId> [ttlSeconds]");
   process.exit(1);
@@ -40,6 +48,7 @@ async function main() {
       "content-type": "application/json",
       "x-mayfly-timestamp": String(timestampMs),
       "x-mayfly-signature": signature,
+      ...VERCEL_BYPASS_HEADERS,
     },
     body: rawBody,
   });
@@ -54,12 +63,18 @@ async function main() {
 
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const statusResponse = await fetch(`${APP_BASE_URL}/api/instances/${runId}`);
+    const statusResponse = await fetch(`${APP_BASE_URL}/api/instances/${runId}`, {
+      headers: VERCEL_BYPASS_HEADERS,
+    });
     const instance = (await statusResponse.json()) as { state: string; url: string | null };
 
     console.log(`  state: ${instance.state}`);
 
-    if (instance.state === "healthy") {
+    // Check the URL, not state === "healthy": a short ttlSeconds can carry the workflow
+    // through healthy into expiring between one poll and the next (activeSeconds can be 0
+    // once ttlSeconds is under the expiring-notice window), so "healthy" itself is not a
+    // reliable poll target — but once a URL has been published it stays published.
+    if (instance.url) {
       console.log(`Instance URL: ${instance.url}`);
       process.exit(0);
     }
