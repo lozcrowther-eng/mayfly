@@ -29,10 +29,18 @@ interface FakeSandbox {
   reaped: boolean;
 }
 
+// Keyed off globalThis because Next.js compiles each route/step bundle separately — a plain
+// module-level (or instance-level) Map would give createSandbox/reap their own private copy
+// instead of sharing one (see the same fix in lib/ctfd/fake-store.ts).
+const GLOBAL_KEY = Symbol.for("mayfly.fakeSandboxes");
+
+function sandboxes(): Map<string, FakeSandbox> {
+  const g = globalThis as unknown as Record<symbol, Map<string, FakeSandbox> | undefined>;
+  return (g[GLOBAL_KEY] ??= new Map());
+}
+
 /** In-memory Sandbox stand-in for local dev (SANDBOX_MODE=fake) — provisions instantly, no microVM. */
 export class FakeSandboxClient implements SandboxClient {
-  private sandboxes = new Map<string, FakeSandbox>();
-
   async create(request: InstanceRequest): Promise<SandboxCreateResult> {
     const name = key(request);
     const sandbox: FakeSandbox = {
@@ -41,25 +49,27 @@ export class FakeSandboxClient implements SandboxClient {
       logs: [`[fake] sandbox ${name} created`],
       reaped: false,
     };
-    this.sandboxes.set(name, sandbox);
+    sandboxes().set(name, sandbox);
     return { sandboxId: sandbox.sandboxId, url: sandbox.url };
   }
 
   async healthUrl(request: InstanceRequest): Promise<string> {
-    const sandbox = this.sandboxes.get(key(request));
+    const sandbox = sandboxes().get(key(request));
     if (!sandbox) throw new Error(`healthUrl called before create for ${key(request)}`);
     return `${sandbox.url}/healthz`;
   }
 
   async readLogs(request: InstanceRequest): Promise<string> {
-    const sandbox = this.sandboxes.get(key(request));
+    const sandbox = sandboxes().get(key(request));
     if (!sandbox) throw new Error(`readLogs called before create for ${key(request)}`);
     return sandbox.logs.join("\n");
   }
 
   async reap(request: InstanceRequest): Promise<void> {
-    const sandbox = this.sandboxes.get(key(request));
-    if (!sandbox) throw new Error(`reap called before create for ${key(request)}`);
+    // A no-op for a sandbox that never got created — reap runs on every workflow exit
+    // path, including one where createSandbox itself never succeeded.
+    const sandbox = sandboxes().get(key(request));
+    if (!sandbox) return;
     sandbox.reaped = true;
   }
 }

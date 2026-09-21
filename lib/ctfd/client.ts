@@ -1,4 +1,5 @@
 import type { InstanceRequest } from "../types";
+import { fakeMarkReaped, fakeMintFlag, fakePublishUrl } from "./fake-store";
 
 /**
  * CTFd owns users, teams, challenges, flags and scores (see CLAUDE.md: the boundary
@@ -13,36 +14,21 @@ export interface CtfdClient {
   markReaped(request: InstanceRequest): Promise<void>;
 }
 
-function key(request: InstanceRequest): string {
-  return `${request.challengeId}:${request.teamId}:${request.runId}`;
-}
-
-interface FakeRecord {
-  flag: string;
-  url: string | null;
-  reaped: boolean;
-}
-
-/** In-memory CTFd stand-in for local dev (CTFD_MODE=fake) — never persists past the process. */
+/**
+ * Delegates to the shared fake-store (lib/ctfd/fake-store.ts) so a workflow run and a manual
+ * curl to /api/fake-ctfd/* both show up on /debug — this is CTFd for local dev (CTFD_MODE=fake).
+ */
 export class FakeCtfdClient implements CtfdClient {
-  private records = new Map<string, FakeRecord>();
-
   async mintFlag(request: InstanceRequest): Promise<string> {
-    const flag = `flag{fake-${key(request)}-${Math.random().toString(36).slice(2, 10)}}`;
-    this.records.set(key(request), { flag, url: null, reaped: false });
-    return flag;
+    return fakeMintFlag(request);
   }
 
   async publishUrl(request: InstanceRequest, url: string): Promise<void> {
-    const record = this.records.get(key(request));
-    if (!record) throw new Error(`publishUrl called before mintFlag for ${key(request)}`);
-    record.url = url;
+    fakePublishUrl(request, url);
   }
 
   async markReaped(request: InstanceRequest): Promise<void> {
-    const record = this.records.get(key(request));
-    if (!record) throw new Error(`markReaped called before mintFlag for ${key(request)}`);
-    record.reaped = true;
+    fakeMarkReaped(request);
   }
 }
 
