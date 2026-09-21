@@ -12,9 +12,6 @@ against a cluster you operate. Mayfly's differences are microVM isolation instea
 kernel, no cluster at all, and a reaper that is a durable continuation of the run that created
 the instance rather than an external cron.
 
-Built as a Vercel Solutions Architect take-home. The code will be read by an interviewer who
-will ask me to defend every decision, so comments explain WHY, not what.
-
 ## The boundary — do not cross it
 
 CTFd, its MySQL, and its Redis stay on GCP. They are the customer's existing world and the

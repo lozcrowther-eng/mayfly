@@ -6,13 +6,15 @@ import { Card } from "@/components/ui/card";
 import { Countdown } from "@/components/countdown";
 import { StatePill } from "@/components/state-pill";
 import { usePersistentState } from "@/hooks/use-persistent-state";
+import { EXTEND_SECONDS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { Challenge } from "@/lib/fixtures/challenges";
 import type { InstanceState } from "@/lib/types";
 
-// 30 min, not the CLI's 1h default — RealSandboxClient adds a ~10 min backstop buffer on
-// top of this (lib/sandbox/real-client.ts), and Vercel Hobby plans cap sandbox sessions at
-// 45 min total, so a 1h player launch would 400 on create() before ever reaching the sandbox.
+// 30 min, not the CLI's 1h default — RealSandboxClient adds a 300s grace buffer on top of
+// this (lib/sandbox/real-client.ts's GRACE_SECONDS), and Vercel Hobby plans cap sandbox
+// sessions at 45 min total, so a 1h player launch would 400 on create() before ever
+// reaching the sandbox.
 const DEFAULT_TTL_SECONDS = 1800;
 const POLL_INTERVAL_MS = 2000;
 
@@ -20,6 +22,7 @@ interface PolledInstance {
   runId: string;
   state: InstanceState;
   url: string | null;
+  logs: string | null;
 }
 
 interface TrackedLaunch {
@@ -94,12 +97,18 @@ export function ChallengeCard({ challenge, teamId }: { challenge: Challenge; tea
     if (!tracked) return;
     setActionPending(action);
     try {
-      await fetch(`/api/instances/${tracked.runId}/${action}`, { method: "POST" });
+      const response = await fetch(`/api/instances/${tracked.runId}/${action}`, { method: "POST" });
+      // The workflow grows the countdown target by EXTEND_SECONDS on a successful extend
+      // (see instance-lifecycle.ts) — mirror that here so the displayed countdown matches
+      // what the server is actually counting down to, not the original launch's deadline.
+      if (action === "extend" && response.ok) {
+        setTracked({ ...tracked, ttlSeconds: tracked.ttlSeconds + EXTEND_SECONDS });
+      }
       await pollOnce(tracked.runId);
     } finally {
       setActionPending(null);
     }
-  }, [tracked, pollOnce]);
+  }, [tracked, pollOnce, setTracked]);
 
   function handleCopy() {
     if (!status?.url) return;
@@ -188,8 +197,16 @@ export function ChallengeCard({ challenge, teamId }: { challenge: Challenge; tea
       )}
 
       {showTriage && (
-        <div className="mt-1 flex h-24 flex-col items-center justify-center rounded-md border border-dashed border-red-900/50 bg-red-950/10">
-          <p className="font-mono text-xs tracking-wide text-red-400/70">awaiting triage</p>
+        <div className="mt-1 flex flex-col rounded-md border border-dashed border-red-900/50 bg-red-950/10">
+          {status?.logs ? (
+            <pre className="max-h-40 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-red-300/80">
+              {status.logs}
+            </pre>
+          ) : (
+            <p className="flex h-24 items-center justify-center font-mono text-xs tracking-wide text-red-400/70">
+              awaiting triage
+            </p>
+          )}
         </div>
       )}
     </Card>

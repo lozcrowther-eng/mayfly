@@ -10,6 +10,12 @@ export interface Challenge {
   compose?: boolean;
   /** Shared-tier only — a fixed URL, not a per-run sandbox domain, so there's nothing to launch. */
   url?: string;
+  /**
+   * Fallback for an image with no `/start.sh` — CLAUDE.md's convention is
+   * `bash -lc 'exec /start.sh'`, tried first; this only matters for an untouched image that
+   * doesn't follow it. None of the fixtures below need it (none have a real image at all yet).
+   */
+  startCommand?: string;
 }
 
 /**

@@ -23,5 +23,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ run
     teamId: status.teamId,
     state: status.state,
     url: status.url,
+    logs: status.logs ?? null,
   });
 }

@@ -1,5 +1,6 @@
 import { Sandbox } from "@vercel/sandbox";
 import { getChallenge } from "../fixtures/challenges";
+import type { Challenge } from "../fixtures/challenges";
 import type { InstanceRequest } from "../types";
 import type { SandboxClient, SandboxCreateResult } from "./client";
 
@@ -9,16 +10,12 @@ function sandboxName(request: InstanceRequest): string {
   return `${request.challengeId}-${request.teamId}-${request.runId}`;
 }
 
-// Defence in depth, not the reaper (CLAUDE.md) — the workflow's own sleep + hook lifecycle is
-// what actually ends the instance. This backstop only matters if that ever gets stuck, so it's
-// set comfortably past the workflow's own budget (ttlSeconds, plus the ~5 extra minutes the
-// post-expiry hook race can add) rather than tracking it exactly.
-const BACKSTOP_BUFFER_MS = 10 * 60 * 1000;
+// Two clocks, never equal (CLAUDE.md) — the workflow's sleep(ttl) -> reap() is the intended
+// lifecycle; this is only a backstop for a lost run, so it sits BEHIND the workflow by this
+// grace window. On extend, RealSandboxClient.extendTimeout() grows this clock by the same
+// amount the workflow grows its own sleep by — see instance-lifecycle.ts's extend loop.
+const GRACE_SECONDS = 300;
 
-// The skill docs for this SDK describe /vercel/sandbox as the working directory; verified
-// directly against @vercel/sandbox 3.3.0 (writeFiles + runCommand pwd) that the actual root
-// on this image is /vercel — no /sandbox subdirectory exists, and a cwd naming it throws
-// "chdir: no such file or directory". Trust the runtime over the docs here.
 const LOG_PATH = "/vercel/app.log";
 
 /** Talks to the real Vercel Sandbox SDK. See CLAUDE.md invariants referenced inline below. */
@@ -36,17 +33,20 @@ export class RealSandboxClient implements SandboxClient {
       persistent: false, // disposable — no snapshot storage cost for a box that dies with its run
       ports: request.ports, // ports from the request, resolved from the challenge fixture at launch
       resources: { vcpus: challenge.compose ? 2 : 1 },
-      env: { FLAG: flag },
-      timeout: request.ttlSeconds * 1000 + BACKSTOP_BUFFER_MS,
+      // HOST=0.0.0.0, not just FLAG — CLAUDE.md: an app bound to 127.0.0.1 returns 502
+      // SANDBOX_NOT_LISTENING because the edge proxy reaches the VM from outside it.
+      env: { FLAG: flag, HOST: "0.0.0.0" },
+      timeout: (request.ttlSeconds + GRACE_SECONDS) * 1000,
     });
 
     // Deliberately NOT in getOrCreate's onCreate: that hook only fires the one time
     // getOrCreate itself creates the sandbox, so if THIS attempt of createSandbox is a retry
-    // after an earlier attempt died partway through starting the server, onCreate would never
-    // fire again on the resumed sandbox and the server would never actually start. Starting it
-    // here, unconditionally, on every attempt, and skipping if it's already answering, is what
-    // actually makes the retry safe — the same idempotency the Workflow SDK docs describe for
-    // step side effects, applied at the sandbox level rather than trusting the hook alone.
+    // after an earlier attempt died partway through starting the challenge, onCreate would
+    // never fire again on the resumed sandbox and it would never actually start. Starting it
+    // here, unconditionally, on every attempt, and skipping if it's already answering, is
+    // what actually makes the retry safe — the same idempotency the Workflow SDK docs
+    // describe for step side effects, applied at the sandbox level rather than trusting the
+    // hook alone.
     if (challenge.compose) {
       // The challenge's docker-compose.yml is expected to already be on the sandbox
       // filesystem (e.g. via a `source: { type: "git", ... }` above) — not wired up yet,
@@ -65,7 +65,7 @@ export class RealSandboxClient implements SandboxClient {
         throw new Error(`docker compose up failed for ${sandbox.name}: ${await compose.stderr()}`);
       }
     } else {
-      await ensurePlaceholderServer(sandbox, request.ports[0], challenge.name);
+      await ensureChallengeRunning(sandbox, challenge, request.ports[0]);
     }
 
     return { sandboxId: sandbox.name, url: sandbox.domain(request.ports[0]) };
@@ -97,6 +97,11 @@ export class RealSandboxClient implements SandboxClient {
     return sandbox.fs.readFile(LOG_PATH, "utf8").catch(() => "");
   }
 
+  async extendTimeout(request: InstanceRequest, extraSeconds: number): Promise<void> {
+    const sandbox = await Sandbox.get({ name: sandboxName(request) });
+    await sandbox.extendTimeout(extraSeconds * 1000);
+  }
+
   async reap(request: InstanceRequest): Promise<void> {
     let sandbox: Sandbox;
     try {
@@ -112,20 +117,49 @@ export class RealSandboxClient implements SandboxClient {
   }
 }
 
-async function ensurePlaceholderServer(sandbox: Sandbox, port: number, challengeName: string): Promise<void> {
-  // No real challenge images exist yet (see lib/fixtures/challenges.ts) — this proves the
-  // Sandbox plumbing (name/ports/resources/env/timeout) works end to end with something
-  // genuinely running and reachable, not a stand-in for an actual challenge container.
+/**
+ * Idempotent across step retries (the "already up" check below), and generic across
+ * challenges (CLAUDE.md: "onboarding a new challenge must never require a control-plane
+ * change"). Tries, in order:
+ *   1. `/start.sh` — the convention every real challenge image is expected to follow.
+ *   2. `challenge.startCommand` — an explicit fallback for an untouched image that has no
+ *      `/start.sh`, configured once per challenge rather than requiring an image rebuild.
+ *   3. A demo-only placeholder server — none of the fixtures in
+ *      lib/fixtures/challenges.ts have a real image yet, so there is nothing to launch
+ *      until (1) or (2) applies; this exists only to prove the Sandbox plumbing
+ *      (name/ports/resources/env/timeout) end to end.
+ */
+async function ensureChallengeRunning(sandbox: Sandbox, challenge: Challenge, port: number): Promise<void> {
   const alreadyUp = await sandbox.runCommand({
     cmd: "bash",
     args: ["-c", `curl -sf http://localhost:${port} >/dev/null && echo up || echo down`],
   });
   if ((await alreadyUp.stdout()).trim() === "up") return; // an earlier attempt already got this far
 
+  const hasStartScript = await sandbox.runCommand({ cmd: "bash", args: ["-lc", "test -x /start.sh"] });
+
+  if (hasStartScript.exitCode === 0) {
+    await sandbox.runCommand({
+      cmd: "bash",
+      args: ["-lc", `exec /start.sh > ${LOG_PATH} 2>&1`],
+      detached: true,
+    });
+    return;
+  }
+
+  if (challenge.startCommand) {
+    await sandbox.runCommand({
+      cmd: "bash",
+      args: ["-lc", `exec ${challenge.startCommand} > ${LOG_PATH} 2>&1`],
+      detached: true,
+    });
+    return;
+  }
+
   await sandbox.writeFiles([
     {
       path: "index.html",
-      content: Buffer.from(`<h1>${challengeName}</h1><p>Placeholder instance — no real challenge image yet.</p>`),
+      content: Buffer.from(`<h1>${challenge.name}</h1><p>Placeholder instance — no real challenge image yet.</p>`),
     },
   ]);
 

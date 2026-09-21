@@ -13,6 +13,8 @@ export interface SandboxClient {
   create(request: InstanceRequest, flag: string): Promise<SandboxCreateResult>;
   healthUrl(request: InstanceRequest): Promise<string>;
   readLogs(request: InstanceRequest): Promise<string>;
+  /** Moves the sandbox's own clock forward alongside the workflow's extended sleep — CLAUDE.md: "move both clocks." */
+  extendTimeout(request: InstanceRequest, extraSeconds: number): Promise<void>;
   reap(request: InstanceRequest): Promise<void>;
 }
 
@@ -71,6 +73,12 @@ export class FakeSandboxClient implements SandboxClient {
     const sandbox = sandboxes().get(key(request));
     if (!sandbox) throw new Error(`readLogs called before create for ${key(request)}`);
     return sandbox.logs.join("\n");
+  }
+
+  async extendTimeout(request: InstanceRequest, extraSeconds: number): Promise<void> {
+    const sandbox = sandboxes().get(key(request));
+    if (!sandbox) return;
+    sandbox.logs.push(`[fake] timeout extended by ${extraSeconds}s`);
   }
 
   async reap(request: InstanceRequest): Promise<void> {

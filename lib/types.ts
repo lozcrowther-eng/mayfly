@@ -30,6 +30,16 @@ export interface InstanceRequest extends LaunchInput {
   runId: string;
 }
 
+/** What the workflow publishes to its run's own stream — see app/workflows/instance-lifecycle.ts. */
+export interface PublishedStatus {
+  challengeId: string;
+  teamId: string;
+  state: InstanceState;
+  url: string | null;
+  /** Populated only on "failed", from the sandbox's own log file — see triageFailure. */
+  logs?: string;
+}
+
 export interface InstanceFailure {
   code:
     | "provision_failed"

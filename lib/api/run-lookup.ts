@@ -1,5 +1,5 @@
 import { getRun } from "workflow/api";
-import type { PublishedStatus } from "@/app/workflows/instance-lifecycle";
+import type { PublishedStatus } from "@/lib/types";
 
 /**
  * Reads back what the workflow itself published to its run's stream (see
@@ -25,7 +25,7 @@ export interface RunIdentity {
   runId: string;
 }
 
-async function readLatestStatus(runId: string): Promise<PublishedStatus | null> {
+export async function readLatestStatus(runId: string): Promise<PublishedStatus | null> {
   let stream: ReturnType<ReturnType<typeof getRun>["getReadable"]>;
   try {
     stream = getRun(runId).getReadable<PublishedStatus>({ startIndex: -1 });
@@ -95,4 +95,50 @@ export async function findRunningInstance(challengeId: string, teamId: string): 
   }
 
   return null;
+}
+
+export interface ActiveCounts {
+  total: number;
+  perTeam: Map<string, number>;
+}
+
+/**
+ * Backs the admission check (lib/admission.ts) — counts currently-running workflow runs
+ * instead of a separately-maintained counter, so "how many instances are live" has exactly
+ * one source of truth (the workflow run) rather than a second store that can drift from it.
+ * excludeRunId omits the run doing the counting: start() has already created it, so without
+ * this every admission check would count itself and over-reject by one.
+ *
+ * A run that hasn't published anything yet (still inside admitInstance/mintFlag) can't be
+ * attributed to a team via its stream — it's counted toward `total` but not `perTeam`. That
+ * narrow window is an accepted imprecision, not a correctness gap: the alternative is a
+ * separate store, which is the exact thing being removed here.
+ */
+export async function countActive(excludeRunId: string): Promise<ActiveCounts> {
+  const { getWorld } = await import("workflow/runtime");
+  const world = getWorld();
+  let cursor: string | undefined;
+  let total = 0;
+  const perTeam = new Map<string, number>();
+
+  for (let page = 0; page < 20; page++) {
+    const { data, cursor: next } = await world.runs.list({
+      workflowName: "workflow//./app/workflows/instance-lifecycle//instanceLifecycle",
+      status: "running",
+      pagination: { cursor, limit: 50 },
+      resolveData: "none",
+    });
+
+    for (const run of data) {
+      if (run.runId === excludeRunId) continue;
+      total += 1;
+      const status = await readLatestStatus(run.runId);
+      if (status) perTeam.set(status.teamId, (perTeam.get(status.teamId) ?? 0) + 1);
+    }
+
+    if (!next) break;
+    cursor = next;
+  }
+
+  return { total, perTeam };
 }
