@@ -32,7 +32,7 @@ export class RealSandboxClient implements SandboxClient {
       name: sandboxName(request), // unique per run
       persistent: false, // disposable — no snapshot storage cost for a box that dies with its run
       ports: request.ports, // ports from the request, resolved from the challenge fixture at launch
-      resources: { vcpus: challenge.compose ? 2 : 1 },
+      resources: { vcpus: challenge.vcpus },
       // HOST=0.0.0.0, not just FLAG — CLAUDE.md: an app bound to 127.0.0.1 returns 502
       // SANDBOX_NOT_LISTENING because the edge proxy reaches the VM from outside it.
       env: { FLAG: flag, HOST: "0.0.0.0" },

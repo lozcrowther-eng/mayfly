@@ -6,6 +6,8 @@ export interface Challenge {
   tier: ChallengeTier;
   /** Ports the challenge listens on inside its sandbox. */
   ports: number[];
+  /** Sandbox vCPUs to allocate (2048 MB RAM per vCPU) — the one source of truth for both create() and cost estimation. */
+  vcpus: number;
   /** Runs multiple processes/services inside its one sandbox (still one sandbox per team per challenge). */
   compose?: boolean;
   /** Shared-tier only — a fixed URL, not a per-run sandbox domain, so there's nothing to launch. */
@@ -27,12 +29,12 @@ export interface Challenge {
  * shared, instead of paying for N ephemeral microVMs that all serve the same bytes.
  */
 export const CHALLENGES: Challenge[] = [
-  { id: "juice-shop", name: "OWASP Juice Shop", tier: "instanced", ports: [3000] },
+  { id: "juice-shop", name: "OWASP Juice Shop", tier: "instanced", ports: [3000], vcpus: 1 },
   // Deliberately never becomes healthy — exercises the failure path (waitForHealthy's
   // retries exhausting, reap still firing in `finally`) end to end against the fakes.
-  { id: "broken-web", name: "Broken Web", tier: "instanced", ports: [3000] },
-  { id: "vuln-api", name: "Vulnerable API", tier: "instanced", ports: [8080], compose: true },
-  { id: "static-web", name: "Static Web", tier: "shared", ports: [8080], url: "https://static-web.mayfly.example" },
+  { id: "broken-web", name: "Broken Web", tier: "instanced", ports: [3000], vcpus: 1 },
+  { id: "vuln-api", name: "Vulnerable API", tier: "instanced", ports: [8080], vcpus: 2, compose: true },
+  { id: "static-web", name: "Static Web", tier: "shared", ports: [8080], vcpus: 1, url: "https://static-web.mayfly.example" },
 ];
 
 export function getChallenge(id: string): Challenge | undefined {

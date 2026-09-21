@@ -47,11 +47,18 @@ async function publishStatus(
   request: InstanceRequest,
   state: InstanceState,
   url: string | null,
-  logs?: string,
+  opts?: { logs?: string; expiresAt?: string | null },
 ): Promise<void> {
   "use step";
 
-  const status: PublishedStatus = { challengeId: request.challengeId, teamId: request.teamId, state, url, logs };
+  const status: PublishedStatus = {
+    challengeId: request.challengeId,
+    teamId: request.teamId,
+    state,
+    url,
+    logs: opts?.logs,
+    expiresAt: opts?.expiresAt ?? null,
+  };
   const writer = getWritable<PublishedStatus>().getWriter();
   try {
     await writer.write(status);
@@ -153,7 +160,6 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
     url = await createSandbox(request, flag);
     await waitForHealthy(request);
     await publishReady(request, url);
-    await publishStatus(request, "healthy", url);
 
     // This replaces a Kubernetes reaper CronJob. There is no external process that has to
     // notice the instance is old and go find it: this sleep is a continuation of the exact
@@ -161,6 +167,11 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
     // the workflow backend restarts in the meantime — durability, not a scheduler, is the reaper.
     let ttlSeconds = request.ttlSeconds;
     let activeSeconds = Math.max(ttlSeconds - EXPIRING_NOTICE_SECONDS, 0);
+    // Date.now() is workflow-safe (the docs explicitly allow seeded time/random APIs here);
+    // this is what /admin's TTL-remaining column counts down to, published alongside state
+    // so it survives a page refresh without the client needing its own copy of ttlSeconds.
+    let expiresAt = new Date(Date.now() + activeSeconds * 1000).toISOString();
+    await publishStatus(request, "healthy", url, { expiresAt });
     await sleep(activeSeconds * 1000);
 
     // TTL expiry is the most common exit in practice — players abandon challenge instances
@@ -170,7 +181,7 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
     // clocks by EXTEND_SECONDS and gives the hook another window to fire in.
     for (;;) {
       await notifyExpiring(request);
-      await publishStatus(request, "expiring", url);
+      await publishStatus(request, "expiring", url, { expiresAt });
 
       const hook = lifecycleHook.create({ token: hookToken(request) });
       const result = await Promise.race([hook, sleep("5 minutes")]);
@@ -184,9 +195,10 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
 
       ttlSeconds += EXTEND_SECONDS;
       await extendInstance(request, EXTEND_SECONDS); // the sandbox's own clock, moved with the workflow's
-      await publishStatus(request, "healthy", url);
 
       activeSeconds = Math.max(EXTEND_SECONDS - EXPIRING_NOTICE_SECONDS, 0);
+      expiresAt = new Date(Date.now() + activeSeconds * 1000).toISOString();
+      await publishStatus(request, "healthy", url, { expiresAt });
       await sleep(activeSeconds * 1000);
     }
   } catch (error) {
@@ -196,7 +208,7 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
     throw error;
   } finally {
     // Runs on every exit: the happy path above, an early return, or any step throwing.
-    await publishStatus(request, terminalState, url, logs);
+    await publishStatus(request, terminalState, url, { logs });
     await reap(request);
   }
 }

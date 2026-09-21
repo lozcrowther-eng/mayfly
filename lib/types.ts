@@ -38,6 +38,8 @@ export interface PublishedStatus {
   url: string | null;
   /** Populated only on "failed", from the sandbox's own log file — see triageFailure. */
   logs?: string;
+  /** ISO 8601 — when the current active window ends and the workflow re-enters "expiring". Set on "healthy"/"expiring", null otherwise. */
+  expiresAt?: string | null;
 }
 
 export interface InstanceFailure {

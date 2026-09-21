@@ -142,3 +142,53 @@ export async function countActive(excludeRunId: string): Promise<ActiveCounts> {
 
   return { total, perTeam };
 }
+
+export interface LiveInstanceRow {
+  runId: string;
+  challengeId: string | null;
+  teamId: string | null;
+  state: PublishedStatus["state"] | "queued";
+  url: string | null;
+  createdAt: string; // ISO 8601 — run metadata, never encrypted (see readLatestStatus's comment)
+  expiresAt: string | null;
+}
+
+/**
+ * Backs /admin. `createdAt` comes straight off the run listing (unencrypted metadata,
+ * confirmed in the same audit that moved lib/admission.ts off decrypted World I/O for
+ * everything else) — only challengeId/teamId/state/url/expiresAt need the per-run stream
+ * read, same as everywhere else in this file.
+ */
+export async function listLiveInstances(): Promise<LiveInstanceRow[]> {
+  const { getWorld } = await import("workflow/runtime");
+  const world = getWorld();
+  let cursor: string | undefined;
+  const rows: LiveInstanceRow[] = [];
+
+  for (let page = 0; page < 20; page++) {
+    const { data, cursor: next } = await world.runs.list({
+      workflowName: "workflow//./app/workflows/instance-lifecycle//instanceLifecycle",
+      status: "running",
+      pagination: { cursor, limit: 50 },
+      resolveData: "none",
+    });
+
+    for (const run of data) {
+      const status = await readLatestStatus(run.runId);
+      rows.push({
+        runId: run.runId,
+        challengeId: status?.challengeId ?? null,
+        teamId: status?.teamId ?? null,
+        state: status?.state ?? "queued",
+        url: status?.url ?? null,
+        createdAt: new Date(run.createdAt).toISOString(),
+        expiresAt: status?.expiresAt ?? null,
+      });
+    }
+
+    if (!next) break;
+    cursor = next;
+  }
+
+  return rows;
+}
