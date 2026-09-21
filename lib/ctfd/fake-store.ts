@@ -80,3 +80,8 @@ export function fakeMarkReaped(instance: InstanceKey): void {
 export function fakeCtfdEvents(): FakeCtfdEvent[] {
   return state().events;
 }
+
+/** Read-only snapshot for the polling endpoint — null until mintFlag has run for this instance. */
+export function fakeInstanceStatus(instance: InstanceKey): FakeInstanceRecord | null {
+  return state().records.get(key(instance)) ?? null;
+}

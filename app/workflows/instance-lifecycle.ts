@@ -9,7 +9,7 @@ const EXPIRING_NOTICE_SECONDS = 300;
 
 export const lifecycleHook = defineHook<{ reason: "solved" | "stopped" | "extend" }>();
 
-function hookToken(request: InstanceRequest): string {
+export function hookToken(request: InstanceRequest): string {
   return `lifecycle:${request.challengeId}:${request.teamId}:${request.runId}`;
 }
 

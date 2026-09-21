@@ -56,6 +56,12 @@ export class FakeSandboxClient implements SandboxClient {
   async healthUrl(request: InstanceRequest): Promise<string> {
     const sandbox = sandboxes().get(key(request));
     if (!sandbox) throw new Error(`healthUrl called before create for ${key(request)}`);
+    if (request.challengeId === "broken-web") {
+      // Fixture (lib/fixtures/challenges.ts): deliberately never becomes healthy, so the
+      // workflow's failure path — waitForHealthy's retries exhausting, reap still firing
+      // in `finally` — has something real to exercise against the fakes.
+      throw new Error(`${request.challengeId} never becomes healthy (fixture)`);
+    }
     return `${sandbox.url}/healthz`;
   }
 
