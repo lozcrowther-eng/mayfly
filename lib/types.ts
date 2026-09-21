@@ -17,6 +17,8 @@ export interface InstanceRequest {
   teamId: string;
   runId: string;
   ttlSeconds: number;
+  /** Ports the challenge listens on, resolved from lib/fixtures/challenges.ts at launch time. */
+  ports: number[];
 }
 
 export interface InstanceFailure {

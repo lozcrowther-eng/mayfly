@@ -34,9 +34,9 @@ async function mintFlag(request: InstanceRequest): Promise<string> {
   return ctfdClient.mintFlag(request);
 }
 
-async function createSandbox(request: InstanceRequest): Promise<string> {
+async function createSandbox(request: InstanceRequest, flag: string): Promise<string> {
   "use step";
-  const { url } = await sandboxClient.create(request);
+  const { url } = await sandboxClient.create(request, flag);
   return url;
 }
 
@@ -79,8 +79,8 @@ export async function instanceLifecycle(request: InstanceRequest): Promise<void>
   await admitInstance(request);
 
   try {
-    await mintFlag(request);
-    const url = await createSandbox(request);
+    const flag = await mintFlag(request);
+    const url = await createSandbox(request, flag);
     await waitForHealthy(request);
     await publishReady(request, url);
 

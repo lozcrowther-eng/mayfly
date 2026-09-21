@@ -4,6 +4,8 @@ export interface Challenge {
   id: string;
   name: string;
   tier: ChallengeTier;
+  /** Ports the challenge listens on inside its sandbox. */
+  ports: number[];
   /** Runs multiple processes/services inside its one sandbox (still one sandbox per team per challenge). */
   compose?: boolean;
 }
@@ -17,10 +19,14 @@ export interface Challenge {
  * shared, instead of paying for N ephemeral microVMs that all serve the same bytes.
  */
 export const CHALLENGES: Challenge[] = [
-  { id: "juice-shop", name: "OWASP Juice Shop", tier: "instanced" },
+  { id: "juice-shop", name: "OWASP Juice Shop", tier: "instanced", ports: [3000] },
   // Deliberately never becomes healthy — exercises the failure path (waitForHealthy's
   // retries exhausting, reap still firing in `finally`) end to end against the fakes.
-  { id: "broken-web", name: "Broken Web", tier: "instanced" },
-  { id: "vuln-api", name: "Vulnerable API", tier: "instanced", compose: true },
-  { id: "static-web", name: "Static Web", tier: "shared" },
+  { id: "broken-web", name: "Broken Web", tier: "instanced", ports: [3000] },
+  { id: "vuln-api", name: "Vulnerable API", tier: "instanced", ports: [8080], compose: true },
+  { id: "static-web", name: "Static Web", tier: "shared", ports: [8080] },
 ];
+
+export function getChallenge(id: string): Challenge | undefined {
+  return CHALLENGES.find((challenge) => challenge.id === id);
+}

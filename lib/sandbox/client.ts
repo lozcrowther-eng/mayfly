@@ -10,7 +10,7 @@ export interface SandboxCreateResult {
  * persistent:false, a unique name per run, and stop() then delete() on reap.
  */
 export interface SandboxClient {
-  create(request: InstanceRequest): Promise<SandboxCreateResult>;
+  create(request: InstanceRequest, flag: string): Promise<SandboxCreateResult>;
   healthUrl(request: InstanceRequest): Promise<string>;
   readLogs(request: InstanceRequest): Promise<string>;
   reap(request: InstanceRequest): Promise<void>;
@@ -25,6 +25,7 @@ function key(request: InstanceRequest): string {
 interface FakeSandbox {
   sandboxId: string;
   url: string;
+  flag: string;
   logs: string[];
   reaped: boolean;
 }
@@ -41,11 +42,12 @@ function sandboxes(): Map<string, FakeSandbox> {
 
 /** In-memory Sandbox stand-in for local dev (SANDBOX_MODE=fake) — provisions instantly, no microVM. */
 export class FakeSandboxClient implements SandboxClient {
-  async create(request: InstanceRequest): Promise<SandboxCreateResult> {
+  async create(request: InstanceRequest, flag: string): Promise<SandboxCreateResult> {
     const name = key(request);
     const sandbox: FakeSandbox = {
       sandboxId: name,
       url: `https://fake-sandbox.local/${name}`,
+      flag,
       logs: [`[fake] sandbox ${name} created`],
       reaped: false,
     };
@@ -80,21 +82,4 @@ export class FakeSandboxClient implements SandboxClient {
   }
 }
 
-/** Talks to the real Vercel Sandbox SDK. Stubbed until the workflow that drives it exists. */
-export class RealSandboxClient implements SandboxClient {
-  async create(): Promise<SandboxCreateResult> {
-    throw new Error("not implemented");
-  }
-
-  async healthUrl(): Promise<string> {
-    throw new Error("not implemented");
-  }
-
-  async readLogs(): Promise<string> {
-    throw new Error("not implemented");
-  }
-
-  async reap(): Promise<void> {
-    throw new Error("not implemented");
-  }
-}
+export { RealSandboxClient } from "./real-client";
