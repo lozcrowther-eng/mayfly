@@ -3,7 +3,11 @@ import { sign } from "../lib/hmac";
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3000";
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
-const DEFAULT_TTL_SECONDS = 3600;
+// 30 min, not 1h — RealSandboxClient adds a 300s grace buffer on top of this (see
+// lib/sandbox/real-client.ts's GRACE_SECONDS), and Vercel Hobby plans cap sandbox sessions
+// at 45 min total, so a 1h default would 400 on create() before ever reaching the sandbox
+// (confirmed by hitting exactly this with SANDBOX_MODE=real and no ttlSeconds argument).
+const DEFAULT_TTL_SECONDS = 1800;
 
 // Not part of the CTFd plugin's contract — Vercel's own Deployment Protection sits in front
 // of preview URLs, orthogonal to mayfly's HMAC auth below. This lets `pnpm launch` reach a

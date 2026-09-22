@@ -16,7 +16,16 @@ function sandboxName(request: InstanceRequest): string {
 // amount the workflow grows its own sleep by — see instance-lifecycle.ts's extend loop.
 const GRACE_SECONDS = 300;
 
-const LOG_PATH = "/vercel/app.log";
+// /tmp exists unconditionally on every Linux image — /vercel does not. That directory is
+// only present because it's baked into Vercel's own vercel/sandbox/* managed images; a
+// custom challenge image built from a generic base (node:6-stretch, ubuntu, ...) has no
+// /vercel at all, so redirecting into it silently fails before the app ever starts (the
+// shell can't open a file under a directory that doesn't exist) — confirmed by launching a
+// real custom-image challenge and finding /vercel absent. CLAUDE.md: "onboarding a new
+// challenge must never require a control-plane change" — depending on a Vercel-specific
+// path effectively required every challenge image to descend from a vercel/sandbox/* base,
+// which /tmp does not.
+const LOG_PATH = "/tmp/app.log";
 
 /** Talks to the real Vercel Sandbox SDK. See CLAUDE.md invariants referenced inline below. */
 export class RealSandboxClient implements SandboxClient {
@@ -33,6 +42,10 @@ export class RealSandboxClient implements SandboxClient {
       persistent: false, // disposable — no snapshot storage cost for a box that dies with its run
       ports: request.ports, // ports from the request, resolved from the challenge fixture at launch
       resources: { vcpus: challenge.vcpus },
+      // Omitted entirely (not `image: undefined`) when the challenge has no image of its
+      // own — Sandbox.getOrCreate falls back to its own default (vercel/sandbox/universal)
+      // only when the key is genuinely absent, not merely undefined-valued.
+      ...(challenge.image ? { image: challenge.image } : {}),
       // HOST=0.0.0.0, not just FLAG — CLAUDE.md: an app bound to 127.0.0.1 returns 502
       // SANDBOX_NOT_LISTENING because the edge proxy reaches the VM from outside it.
       env: { FLAG: flag, HOST: "0.0.0.0" },
@@ -124,10 +137,11 @@ export class RealSandboxClient implements SandboxClient {
  *   1. `/start.sh` — the convention every real challenge image is expected to follow.
  *   2. `challenge.startCommand` — an explicit fallback for an untouched image that has no
  *      `/start.sh`, configured once per challenge rather than requiring an image rebuild.
- *   3. A demo-only placeholder server — none of the fixtures in
- *      lib/fixtures/challenges.ts have a real image yet, so there is nothing to launch
- *      until (1) or (2) applies; this exists only to prove the Sandbox plumbing
- *      (name/ports/resources/env/timeout) end to end.
+ *   3. A demo-only placeholder server — for a challenge with no `image` set at all (still
+ *      the case for most fixtures in lib/fixtures/challenges.ts), the sandbox boots the
+ *      default `vercel/sandbox/universal` image, which has nothing of its own to launch;
+ *      this exists only to prove the Sandbox plumbing (name/ports/resources/env/timeout)
+ *      end to end without a real challenge image behind it.
  */
 async function ensureChallengeRunning(sandbox: Sandbox, challenge: Challenge, port: number): Promise<void> {
   const alreadyUp = await sandbox.runCommand({

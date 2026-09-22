@@ -265,7 +265,15 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
     // Only for failures that never went through triageHealthCheckFailure (admission
     // rejection, mintFlag failure, a hook-loop error) — that path already captured logs
     // (and an AI triage) itself, so this would otherwise be a redundant second log read.
-    if (logs === undefined) logs = await captureBootOutput(request);
+    if (logs === undefined) {
+      // captureBootOutput needs a sandbox to already exist to read anything from it — a
+      // failure here that happened before createSandbox ever succeeded (a transient
+      // createSandbox-level error, not a health-check timeout) has nothing to read and
+      // comes back empty. Fall back to the thrown error's own message so a real failure at
+      // that point is still visible instead of publishing completely blank diagnostics.
+      const captured = await captureBootOutput(request);
+      logs = captured || `create failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
     url = null;
     throw error;
   } finally {
