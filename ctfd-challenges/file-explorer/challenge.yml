@@ -22,7 +22,6 @@ description: |
 # Accepts strings
 tags:
   - node.js
-  - Snyk Open Source
 
 # Provide paths to files from the same directory that this file is in
 # Accepts strings
@@ -35,7 +34,7 @@ tags:
 # Accepts dictionaries or strings
 hints:
   - {
-    content: "Fork this repo and import into Snyk https://github.com/apj-ctf/file-explorer",
+    content: "Fork this repo https://github.com/apj-ctf/file-explorer",
     cost: 0
   }
   - {

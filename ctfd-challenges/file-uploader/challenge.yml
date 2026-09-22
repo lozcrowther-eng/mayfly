@@ -21,18 +21,17 @@ description: "Try to trick the zip file uploader"
 # Accepts strings
 tags:
   - node.JS
-  - Snyk Code
 
 hints:
   - {
-    content: "Fork this repo and import into Snyk https://github.com/apj-ctf/file-uploader",
+    content: "Fork this repo https://github.com/apj-ctf/file-uploader",
     cost: 0
   }
   - {
     content: "Theres a vulnerability in the code that lets you upload a zip file with an arbitrary file name.
             <br>
             <br>
-             from Snyk Code:: Unsanitized input from an HTTP parameter flows into fs.readFileSync, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to read arbitrary files.",
+             from SAST:: Unsanitized input from an HTTP parameter flows into fs.readFileSync, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to read arbitrary files.",
     cost: 10
   }
   - {
