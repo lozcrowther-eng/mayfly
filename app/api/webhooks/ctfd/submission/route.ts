@@ -1,5 +1,6 @@
 import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
+import { HookNotFoundError } from "workflow/errors";
 import { hookToken, lifecycleHook } from "@/app/workflows/instance-lifecycle";
 import { SubmissionWebhookSchema } from "@/lib/api/schemas";
 import { findRunningInstance } from "@/lib/api/run-lookup";
@@ -34,7 +35,15 @@ export async function POST(request: Request) {
     // "one sandbox per team per challenge" (CLAUDE.md) makes it well-defined.
     const identity = await findRunningInstance(challengeId, teamId);
     if (identity) {
-      await lifecycleHook.resume(hookToken(identity), { reason: "solved" });
+      try {
+        await lifecycleHook.resume(hookToken(identity), { reason: "solved" });
+      } catch (error) {
+        // The hook only exists once the run reaches its post-TTL expiry window (see
+        // lib/api/resume-lifecycle.ts) — most solves land well before that, so this is the
+        // common case, not a failure. Early termination on solve is an optimization on top
+        // of the normal TTL-driven reap, not something a submission can depend on.
+        if (!(error instanceof HookNotFoundError)) throw error;
+      }
     }
   }
 

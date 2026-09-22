@@ -14,6 +14,37 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
+// useSyncExternalStore requires getSnapshot to return the SAME reference across calls when
+// nothing has changed — JSON.parse allocates a fresh object every call, so without this
+// cache React sees a "new" snapshot on every render and re-renders forever (the exact
+// "Maximum update depth exceeded" loop this was hit by). Keyed per storage key so unrelated
+// ChallengeCards (different team/challenge) never share a cached value.
+const snapshotCache = new Map<string, { raw: string | null; value: unknown }>();
+
+function readSnapshot<T>(key: string, defaultValue: T): T {
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(key);
+  } catch {
+    raw = null;
+  }
+
+  const cached = snapshotCache.get(key);
+  if (cached && cached.raw === raw) {
+    return cached.value as T;
+  }
+
+  let value: T;
+  try {
+    value = raw ? (JSON.parse(raw) as T) : defaultValue;
+  } catch {
+    value = defaultValue;
+  }
+
+  snapshotCache.set(key, { raw, value });
+  return value;
+}
+
 /**
  * A localStorage-backed value read as an external store, not local React state synced via
  * a useEffect — the latter is exactly the "setState synchronously within an effect" shape
@@ -25,14 +56,7 @@ function notify(): void {
 export function usePersistentState<T>(key: string, defaultValue: T): [T, (value: T) => void] {
   const value = useSyncExternalStore(
     subscribe,
-    () => {
-      try {
-        const raw = window.localStorage.getItem(key);
-        return raw ? (JSON.parse(raw) as T) : defaultValue;
-      } catch {
-        return defaultValue;
-      }
-    },
+    () => readSnapshot(key, defaultValue),
     () => defaultValue,
   );
 

@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "launch": "tsx --env-file=.env.local scripts/launch.ts",
+    "fake-ctfd": "tsx --env-file=.env.local scripts/fake-ctfd.ts",
     "eval:triage": "tsx --env-file=.env.local scripts/eval-triage.ts"
   },
   "dependencies": {

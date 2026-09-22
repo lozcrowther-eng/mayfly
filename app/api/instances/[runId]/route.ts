@@ -17,12 +17,22 @@ export async function GET(_request: Request, { params }: { params: Promise<{ run
     return NextResponse.json({ runId, challengeId: null, teamId: null, state: "queued", url: null });
   }
 
+  // Admin's kill-while-healthy path (lib/api/kill-instance.ts) cancels the run directly when
+  // there's no hook to resume — the only way to kill an instance that isn't already in its
+  // expiry window. cancel() ends execution before the workflow's own `finally` block can
+  // publish a final status, so the stream's last chunk is whatever was true before the kill
+  // (e.g. "healthy") and stays that way forever. run.status flips to "cancelled" immediately
+  // though, so it's the one signal that's actually authoritative once that's happened —
+  // treat it as terminal here rather than trusting a stream chunk the kill already made stale.
+  const runStatus = await run.status;
+  const state = runStatus === "cancelled" && status.state !== "reaped" ? "reaped" : status.state;
+
   return NextResponse.json({
     runId,
     challengeId: status.challengeId,
     teamId: status.teamId,
-    state: status.state,
-    url: status.url,
+    state,
+    url: state === "reaped" ? null : status.url,
     logs: status.logs ?? null,
     triage: status.triage ?? null,
   });
