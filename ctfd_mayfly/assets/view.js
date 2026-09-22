@@ -154,13 +154,19 @@ CTFd._internal.challenge.preRender = function () {};
     var countdownEl = qs("#mayfly-countdown");
     if (data.expires_at) {
       var remainingMs = new Date(data.expires_at).getTime() - Date.now();
-      countdownEl.textContent =
-        remainingMs > 0
-          ? "Expires in " + Math.max(Math.floor(remainingMs / 1000), 0) + "s"
-          : "Expiring...";
+      countdownEl.textContent = remainingMs > 0 ? "Expires in " + formatDuration(remainingMs) : "Expiring...";
     } else {
       countdownEl.textContent = "";
     }
+  }
+
+  // A raw second count (e.g. "1437s") is unreadable at TTL scale (minutes to tens of
+  // minutes) -- m/s is what a player actually wants to glance at mid-challenge.
+  function formatDuration(ms) {
+    var totalSeconds = Math.max(Math.floor(ms / 1000), 0);
+    var minutes = Math.floor(totalSeconds / 60);
+    var seconds = totalSeconds % 60;
+    return minutes + "m " + (seconds < 10 ? "0" : "") + seconds + "s";
   }
 
   function pollStatus(runId) {
@@ -349,12 +355,45 @@ CTFd._internal.challenge.preRender = function () {};
 
     qs("#mayfly-extend-btn").addEventListener("click", function () {
       if (!currentRunId) return;
+      // No feedback at all here before -- a click just silently fired the fetch, with
+      // nothing to show it registered until the next 2s poll (or not at all, if it failed).
+      var btn = qs("#mayfly-extend-btn");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Extending…";
+      }
       fetch("/plugins/ctfd_mayfly/extend", {
         method: "POST",
         credentials: "same-origin",
         headers: csrfHeaders(),
         body: JSON.stringify({ run_id: currentRunId }),
-      });
+      })
+        .then(function (res) {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = "Extend";
+          }
+          if (!res.ok) {
+            return res
+              .json()
+              .catch(function () {
+                return {};
+              })
+              .then(function (body) {
+                showPanelError("extend failed", body.error || res.status);
+              });
+          }
+          // Success: the very next poll (<=2s away) re-renders #mayfly-countdown with the
+          // real, now-extended expires_at -- nothing more to do here than end the
+          // "Extending…" state, above.
+        })
+        .catch(function (err) {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = "Extend";
+          }
+          showPanelError("extend failed", err);
+        });
     });
 
     qs("#mayfly-stop-btn").addEventListener("click", function () {

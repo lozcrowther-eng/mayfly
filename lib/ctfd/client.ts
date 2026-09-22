@@ -14,8 +14,14 @@ export interface ScoreboardEntry {
 export interface CtfdClient {
   /** Mints a fresh, per-instance dynamic flag and registers it against the challenge+team in CTFd. */
   mintFlag(request: InstanceRequest): Promise<string>;
-  /** Publishes the live sandbox URL so players see it on the CTFd challenge page. */
-  publishUrl(request: InstanceRequest, url: string): Promise<void>;
+  /**
+   * Publishes the live sandbox URL so players see it on the CTFd challenge page. Also
+   * carries the current expiresAt so CTFd's own status endpoint (what the player's browser
+   * actually polls, not the orchestrator's /api/instances) can show a real countdown instead
+   * of always-null — called again on every successful extend, not just the initial ready
+   * publish, so the countdown reflects the extended time rather than going stale.
+   */
+  publishUrl(request: InstanceRequest, url: string, expiresAt: string | null): Promise<void>;
   /** Tells CTFd the instance has been reaped, so it stops advertising the URL/flag as live. */
   markReaped(request: InstanceRequest): Promise<void>;
   /** Reads the current scoreboard — the source /scoreboard's cached fetch reads through. */
@@ -38,8 +44,8 @@ export class FakeCtfdClient implements CtfdClient {
     return fakeMintFlag(request);
   }
 
-  async publishUrl(request: InstanceRequest, url: string): Promise<void> {
-    fakePublishUrl(request, url);
+  async publishUrl(request: InstanceRequest, url: string, expiresAt: string | null): Promise<void> {
+    fakePublishUrl(request, url, expiresAt);
   }
 
   async markReaped(request: InstanceRequest): Promise<void> {
@@ -105,8 +111,8 @@ export class RealCtfdClient implements CtfdClient {
     return flag;
   }
 
-  async publishUrl(request: InstanceRequest, url: string): Promise<void> {
-    await ctfdInternalRequest("PATCH", `/instances/${request.runId}`, { url, state: "healthy" });
+  async publishUrl(request: InstanceRequest, url: string, expiresAt: string | null): Promise<void> {
+    await ctfdInternalRequest("PATCH", `/instances/${request.runId}`, { url, state: "healthy", expires_at: expiresAt });
   }
 
   async markReaped(request: InstanceRequest): Promise<void> {

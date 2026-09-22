@@ -96,9 +96,9 @@ async function waitForHealthy(request: InstanceRequest): Promise<void> {
   }
 }
 
-async function publishReady(request: InstanceRequest, url: string): Promise<void> {
+async function publishReady(request: InstanceRequest, url: string, expiresAt: string | null): Promise<void> {
   "use step";
-  await getCtfdClient().publishUrl(request, url);
+  await getCtfdClient().publishUrl(request, url, expiresAt);
 }
 
 async function notifyExpiring(request: InstanceRequest): Promise<void> {
@@ -108,10 +108,22 @@ async function notifyExpiring(request: InstanceRequest): Promise<void> {
   );
 }
 
-/** Moves the sandbox's own clock forward — CLAUDE.md: "On extend, call sandbox.extendTimeout() as well as extending the sleep — move both clocks." */
-async function extendInstance(request: InstanceRequest, extraSeconds: number): Promise<void> {
+/**
+ * Moves the sandbox's own clock forward — CLAUDE.md: "On extend, call sandbox.extendTimeout()
+ * as well as extending the sleep — move both clocks." Returns what was actually granted:
+ * the sandbox's own platform session cap (see real-client.ts) can mean this is less than
+ * requested, or 0 once the cap is reached, and the workflow's own ttlSeconds/expiresAt must
+ * grow by that real number rather than by whatever was merely asked for — growing them by
+ * the request instead of the grant is exactly the mismatch CLAUDE.md's "two clocks, never
+ * equal" invariant warns about, just introduced by extend rather than by create.
+ */
+async function extendInstance(
+  request: InstanceRequest,
+  extraSeconds: number,
+  currentTtlSeconds: number,
+): Promise<number> {
   "use step";
-  await getSandboxClient().extendTimeout(request, extraSeconds);
+  return getSandboxClient().extendTimeout(request, extraSeconds, currentTtlSeconds);
 }
 
 /**
@@ -204,8 +216,6 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
       }
     }
 
-    await publishReady(request, url);
-
     // This replaces a Kubernetes reaper CronJob. There is no external process that has to
     // notice the instance is old and go find it: this sleep is a continuation of the exact
     // run that created the sandbox, so the reap() in `finally` is guaranteed to fire even if
@@ -216,6 +226,7 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
     // this is what /admin's TTL-remaining column counts down to, published alongside state
     // so it survives a page refresh without the client needing its own copy of ttlSeconds.
     let expiresAt = new Date(Date.now() + activeSeconds * 1000).toISOString();
+    await publishReady(request, url, expiresAt);
     await publishStatus(request, "healthy", url, { expiresAt });
 
     // The hook is live for the whole healthy period, not only once "expiring" — a player
@@ -238,12 +249,27 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
       hook.dispose();
 
       if (result?.reason === "extend") {
-        ttlSeconds += EXTEND_SECONDS;
-        await extendInstance(request, EXTEND_SECONDS); // the sandbox's own clock, moved with the workflow's
-        activeSeconds = Math.max(EXTEND_SECONDS - EXPIRING_NOTICE_SECONDS, 0);
-        expiresAt = new Date(Date.now() + activeSeconds * 1000).toISOString();
-        notifiedExpiring = false;
-        await publishStatus(request, "healthy", url, { expiresAt });
+        // Ask before growing our own tally, not after -- currentTtlSeconds is what
+        // extendInstance needs to know how much headroom is left against the sandbox's
+        // platform session cap (see real-client.ts). grantedSeconds can be less than
+        // EXTEND_SECONDS, or 0 once that cap is reached.
+        const grantedSeconds = await extendInstance(request, EXTEND_SECONDS, ttlSeconds);
+        if (grantedSeconds > 0) {
+          ttlSeconds += grantedSeconds;
+          // Add to whatever's actually still remaining, not the bare granted delta — the
+          // previous version replaced activeSeconds with just this, so clicking Extend with
+          // e.g. 24 minutes left could make the countdown drop to ~4 (confirmed: this is
+          // exactly what "extend goes from 24 mins to approx 4 mins" was).
+          const remainingActiveMs = Math.max(new Date(expiresAt).getTime() - Date.now(), 0);
+          activeSeconds = Math.floor(remainingActiveMs / 1000) + grantedSeconds;
+          expiresAt = new Date(Date.now() + activeSeconds * 1000).toISOString();
+          notifiedExpiring = false;
+          await publishReady(request, url, expiresAt); // keeps CTFd's own countdown current too
+          await publishStatus(request, "healthy", url, { expiresAt });
+        }
+        // grantedSeconds === 0: already at the platform's session cap. Nothing to grow --
+        // leave state/expiresAt as they were rather than publishing a no-op "healthy" that
+        // implies more time was actually added.
         continue;
       }
 

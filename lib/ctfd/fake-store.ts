@@ -71,11 +71,11 @@ export function fakeMintFlag(instance: InstanceKey): string {
   return flag;
 }
 
-export function fakePublishUrl(instance: InstanceKey, url: string): void {
+export function fakePublishUrl(instance: InstanceKey, url: string, expiresAt: string | null): void {
   const existing = state().records.get(key(instance));
   if (!existing) throw new Error(`publishUrl called before mintFlag for ${key(instance)}`);
   existing.url = url;
-  record("publish_url", instance, { url });
+  record("publish_url", instance, { url, expiresAt });
 }
 
 /** A no-op for an instance CTFd never heard about — reap must be safe to call on every exit path. */

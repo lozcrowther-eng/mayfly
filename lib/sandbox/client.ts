@@ -13,8 +13,18 @@ export interface SandboxClient {
   create(request: InstanceRequest, flag: string): Promise<SandboxCreateResult>;
   healthUrl(request: InstanceRequest): Promise<string>;
   readLogs(request: InstanceRequest): Promise<string>;
-  /** Moves the sandbox's own clock forward alongside the workflow's extended sleep — CLAUDE.md: "move both clocks." */
-  extendTimeout(request: InstanceRequest, extraSeconds: number): Promise<void>;
+  /**
+   * Moves the sandbox's own clock forward alongside the workflow's extended sleep —
+   * CLAUDE.md: "move both clocks." currentTtlSeconds is the workflow's own tally of active
+   * seconds granted so far (pre-this-extend), needed to know how much headroom is left
+   * against the platform's own hard session cap. Returns the seconds actually granted —
+   * on Hobby this can be less than requested, or 0 once the cap is reached — so the caller
+   * grows its own tracked ttlSeconds/expiresAt by what the sandbox actually got, not by
+   * what was merely asked for (see real-client.ts's extendTimeout for why: asking for more
+   * than the platform allows doesn't clamp, it 400s, and doing that unconditionally used to
+   * take the whole instance down with it).
+   */
+  extendTimeout(request: InstanceRequest, extraSeconds: number, currentTtlSeconds: number): Promise<number>;
   reap(request: InstanceRequest): Promise<void>;
 }
 
@@ -75,10 +85,14 @@ export class FakeSandboxClient implements SandboxClient {
     return sandbox.logs.join("\n");
   }
 
-  async extendTimeout(request: InstanceRequest, extraSeconds: number): Promise<void> {
+  async extendTimeout(request: InstanceRequest, extraSeconds: number): Promise<number> {
+    // No platform session cap to model here — the fake exists to exercise the workflow's
+    // own control flow cheaply, not Vercel Sandbox's plan limits (see RealSandboxClient's
+    // extendTimeout for where that's actually enforced).
     const sandbox = sandboxes().get(key(request));
-    if (!sandbox) return;
+    if (!sandbox) return extraSeconds;
     sandbox.logs.push(`[fake] timeout extended by ${extraSeconds}s`);
+    return extraSeconds;
   }
 
   async reap(request: InstanceRequest): Promise<void> {

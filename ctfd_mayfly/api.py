@@ -15,6 +15,7 @@ Three blueprints:
 import functools
 import hmac
 import os
+from datetime import datetime
 
 from flask import Blueprint, abort, jsonify, render_template, request
 
@@ -48,11 +49,19 @@ def _current_live_instance(owner_id: int, challenge_id):
 
 
 def _instance_json(instance: MayflyInstance) -> dict:
+    # SQLite/SQLAlchemy's plain db.DateTime strips tzinfo on write, so this comes back
+    # naive -- but always UTC in practice, since the orchestrator only ever sends
+    # .toISOString() (see internal_update_instance's parsing above). Re-appending "Z" makes
+    # that explicit again rather than leaving the frontend's `new Date(...)` to guess: an
+    # offset-less ISO string with a time component is ambiguous across JS engines (some
+    # treat it as local time, not UTC), which would silently skew the player's countdown by
+    # their timezone offset.
+    expires_at = instance.expires_at.isoformat() + "Z" if instance.expires_at else None
     return {
         "run_id": instance.run_id,
         "state": instance.state,
         "url": instance.url,
-        "expires_at": instance.expires_at.isoformat() if instance.expires_at else None,
+        "expires_at": expires_at,
     }
 
 
@@ -251,6 +260,12 @@ def internal_update_instance(run_id):
         instance.url = data["url"]
     if "state" in data:
         instance.state = data["state"]
+    # Sent on every publishUrl call from the orchestrator -- initial ready AND every
+    # successful extend (see lib/ctfd/client.ts) -- so this stays current instead of only
+    # ever reflecting the instance's very first healthy publish. None/absent means "unknown",
+    # not "no expiry" -- leaves the previous value alone rather than clearing it.
+    if "expires_at" in data and data["expires_at"]:
+        instance.expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
     db.session.commit()
     return jsonify({"ok": True})
 

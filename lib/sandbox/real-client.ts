@@ -55,6 +55,16 @@ function sandboxName(request: InstanceRequest): string {
 // amount the workflow grows its own sleep by — see instance-lifecycle.ts's extend loop.
 const GRACE_SECONDS = 300;
 
+// Vercel Sandbox's own hard per-session cap on this plan: Hobby is 45 minutes, Pro/Ent 24h
+// (see the vercel-sandbox skill). This is a platform limit, not ours to raise by asking
+// nicely — sandbox.extendTimeout() 400s with "extension would exceed maximum execution
+// timeout" past it, and previously that 400 propagated as an uncaught step failure, which
+// crashed the *entire* run (not just the extend), reaping the still-healthy instance out
+// from under the player. Clamping the request before it's ever sent is what actually fixes
+// that, not retrying or catching the rejection after the fact. Raise this if the project
+// moves to Pro/Enterprise.
+const MAX_SESSION_SECONDS = 45 * 60;
+
 // /tmp exists unconditionally on every Linux image — /vercel does not. That directory is
 // only present because it's baked into Vercel's own vercel/sandbox/* managed images; a
 // custom challenge image built from a generic base (node:6-stretch, ubuntu, ...) has no
@@ -148,9 +158,19 @@ export class RealSandboxClient implements SandboxClient {
     return sandbox.fs.readFile(LOG_PATH, "utf8").catch(() => "");
   }
 
-  async extendTimeout(request: InstanceRequest, extraSeconds: number): Promise<void> {
+  async extendTimeout(request: InstanceRequest, extraSeconds: number, currentTtlSeconds: number): Promise<number> {
+    // currentTtlSeconds + GRACE_SECONDS is the sandbox's own timeout as it stands right now
+    // (see create()'s `timeout:` above) — headroom is whatever's left before that total
+    // would cross the platform's session cap. Never negative in practice (a prior extend
+    // already stopped growing ttlSeconds once headroom hit 0), but the clamp guards it
+    // anyway rather than trusting that invariant to hold forever.
+    const headroomSeconds = Math.max(0, MAX_SESSION_SECONDS - GRACE_SECONDS - currentTtlSeconds);
+    const grantSeconds = Math.min(extraSeconds, headroomSeconds);
+    if (grantSeconds <= 0) return 0; // already at the platform's cap — nothing to ask for
+
     const sandbox = await Sandbox.get({ name: sandboxName(request) });
-    await sandbox.extendTimeout(extraSeconds * 1000);
+    await sandbox.extendTimeout(grantSeconds * 1000);
+    return grantSeconds;
   }
 
   async reap(request: InstanceRequest): Promise<void> {
