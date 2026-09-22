@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { ChallengeBoard } from "@/components/challenge-board";
 import { DemoConsoleBanner } from "@/components/demo-console-banner";
 import { ModeBanner } from "@/components/mode-banner";
+import { NavLinks } from "@/components/nav-links";
 import { CHALLENGES } from "@/lib/fixtures/challenges";
 
 // The mode banner's entire point is showing the CURRENT deployment's env vars. Reading
@@ -29,6 +30,7 @@ export default async function Home() {
     <div className="dark flex min-h-screen flex-col bg-black">
       <DemoConsoleBanner />
       <ModeBanner ctfdMode={ctfdMode} sandboxMode={sandboxMode} />
+      <NavLinks />
       <ChallengeBoard challenges={CHALLENGES} />
     </div>
   );
