@@ -17,8 +17,22 @@ export interface LaunchInput {
   challengeId: string;
   teamId: string;
   ttlSeconds: number;
-  /** Ports the challenge listens on, resolved from lib/fixtures/challenges.ts at launch time. */
+  /** Ports the challenge listens on — resolved from lib/fixtures/challenges.ts, or straight
+   * from the request when a caller supplies its own config (see image below). Either way
+   * this is always populated by the time the workflow runs; nothing downstream branches on
+   * where it came from. */
   ports: number[];
+  /**
+   * Optional per-request challenge config, provided directly by a caller that already owns
+   * this data (e.g. the CTFd plugin's own MayflyChallengeModel) instead of challengeId
+   * needing to match a lib/fixtures/challenges.ts entry. When image is present,
+   * RealSandboxClient uses these instead of looking the challenge up by id — see
+   * launchInstance() in lib/api/launch.ts and resolveChallengeConfig() in
+   * lib/sandbox/real-client.ts.
+   */
+  image?: string;
+  vcpus?: number;
+  startCommand?: string;
 }
 
 /**

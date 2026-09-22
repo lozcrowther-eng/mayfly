@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import type { InstanceRequest } from "../types";
 import { fakeMarkReaped, fakeMintFlag, fakePublishUrl, fakeRecordSolve, fakeScoreboard } from "./fake-store";
 
@@ -66,18 +67,50 @@ function requireCtfdApiToken(): string {
   return token;
 }
 
-/** Talks to the real CTFd API on GCP. Stubbed until the CTFd plugin (plan §8) exists. */
+// Shared with the CTFd plugin's own INSTANCER_SECRET (see ctfd_mayfly/README.md) — signs
+// nothing here (unlike the CTFd->orchestrator launch call, this is the reverse direction:
+// orchestrator->CTFd), just sent as a plain header the plugin compares with
+// hmac.compare_digest. Reusing MAYFLY_SIGNING_SECRET rather than a third env var keeps one
+// secret shared across both directions of this integration instead of two to rotate.
+function requireInternalSecret(): string {
+  const secret = process.env.MAYFLY_SIGNING_SECRET;
+  if (!secret) throw new Error("MAYFLY_SIGNING_SECRET is required when CTFD_MODE=real");
+  return secret;
+}
+
+async function ctfdInternalRequest(method: string, path: string, body?: unknown): Promise<void> {
+  const res = await fetch(`${requireCtfdBaseUrl()}/plugins/ctfd_mayfly/internal${path}`, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      "X-Mayfly-Internal-Secret": requireInternalSecret(),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    throw new Error(`CTFd internal API ${method} ${path} failed: ${res.status} ${await res.text()}`);
+  }
+}
+
+/** Talks to the real CTFd plugin's internal API (see ctfd_mayfly/api.py's internal_bp). */
 export class RealCtfdClient implements CtfdClient {
-  async mintFlag(): Promise<string> {
-    throw new Error("not implemented");
+  async mintFlag(request: InstanceRequest): Promise<string> {
+    // The orchestrator generates and holds the plaintext (it's the one injecting FLAG into
+    // the sandbox); CTFd only ever learns the hash, via the plugin's own internal API — see
+    // ctfd_mayfly/challenge.py's attempt(), which compares a submission's digest against
+    // exactly this, never a plaintext round-trip.
+    const flag = `mayfly{${randomBytes(16).toString("hex")}}`;
+    const flagHash = createHash("sha256").update(flag, "utf8").digest("hex");
+    await ctfdInternalRequest("POST", `/instances/${request.runId}/flag`, { flag_hash: flagHash });
+    return flag;
   }
 
-  async publishUrl(): Promise<void> {
-    throw new Error("not implemented");
+  async publishUrl(request: InstanceRequest, url: string): Promise<void> {
+    await ctfdInternalRequest("PATCH", `/instances/${request.runId}`, { url, state: "healthy" });
   }
 
-  async markReaped(): Promise<void> {
-    throw new Error("not implemented");
+  async markReaped(request: InstanceRequest): Promise<void> {
+    await ctfdInternalRequest("POST", `/instances/${request.runId}/reaped`);
   }
 
   // Unlike mintFlag/publishUrl/markReaped, this doesn't wait on the not-yet-built CTFd

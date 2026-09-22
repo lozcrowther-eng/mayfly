@@ -1,8 +1,47 @@
 import { Sandbox } from "@vercel/sandbox";
 import { getChallenge } from "../fixtures/challenges";
-import type { Challenge } from "../fixtures/challenges";
 import type { InstanceRequest } from "../types";
 import type { SandboxClient, SandboxCreateResult } from "./client";
+
+/**
+ * Everything create()/ensureChallengeRunning() actually need to know about a challenge —
+ * deliberately smaller than lib/fixtures/challenges.ts's Challenge type, since a request that
+ * carries its own image (see LaunchInput) never has a Challenge object at all.
+ */
+interface ResolvedChallengeConfig {
+  name: string;
+  vcpus: number;
+  image?: string;
+  startCommand?: string;
+  compose?: boolean;
+}
+
+/**
+ * Two sources, same shape: a request that supplied its own image (the CTFd plugin's
+ * MayflyChallengeModel, relayed through lib/api/launch.ts) needs no fixture at all; anything
+ * else still resolves against lib/fixtures/challenges.ts by challengeId, exactly as before.
+ */
+function resolveChallengeConfig(request: InstanceRequest): ResolvedChallengeConfig {
+  if (request.image) {
+    return {
+      name: request.challengeId,
+      vcpus: request.vcpus ?? 1,
+      image: request.image,
+      startCommand: request.startCommand,
+      compose: false,
+    };
+  }
+
+  const challenge = getChallenge(request.challengeId);
+  if (!challenge) throw new Error(`unknown challenge ${request.challengeId}`);
+  return {
+    name: challenge.name,
+    vcpus: challenge.vcpus,
+    image: challenge.image,
+    startCommand: challenge.startCommand,
+    compose: challenge.compose,
+  };
+}
 
 function sandboxName(request: InstanceRequest): string {
   // Matches the Sandbox naming rule in CLAUDE.md: reusing a name resumes a previous
@@ -30,8 +69,7 @@ const LOG_PATH = "/tmp/app.log";
 /** Talks to the real Vercel Sandbox SDK. See CLAUDE.md invariants referenced inline below. */
 export class RealSandboxClient implements SandboxClient {
   async create(request: InstanceRequest, flag: string): Promise<SandboxCreateResult> {
-    const challenge = getChallenge(request.challengeId);
-    if (!challenge) throw new Error(`unknown challenge ${request.challengeId}`);
+    const challenge = resolveChallengeConfig(request);
 
     // getOrCreate, not create() — steps are retried by default (see CLAUDE.md: durable
     // retries), and a create() side effect can register on Vercel's side even if this step
@@ -143,7 +181,11 @@ export class RealSandboxClient implements SandboxClient {
  *      this exists only to prove the Sandbox plumbing (name/ports/resources/env/timeout)
  *      end to end without a real challenge image behind it.
  */
-async function ensureChallengeRunning(sandbox: Sandbox, challenge: Challenge, port: number): Promise<void> {
+async function ensureChallengeRunning(
+  sandbox: Sandbox,
+  challenge: ResolvedChallengeConfig,
+  port: number,
+): Promise<void> {
   const alreadyUp = await sandbox.runCommand({
     cmd: "bash",
     args: ["-c", `curl -sf http://localhost:${port} >/dev/null && echo up || echo down`],
