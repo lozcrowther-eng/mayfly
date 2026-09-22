@@ -151,6 +151,7 @@ export interface LiveInstanceRow {
   url: string | null;
   createdAt: string; // ISO 8601 — run metadata, never encrypted (see readLatestStatus's comment)
   expiresAt: string | null;
+  vcpus: number | null;
 }
 
 /**
@@ -183,6 +184,7 @@ export async function listLiveInstances(): Promise<LiveInstanceRow[]> {
         url: status?.url ?? null,
         createdAt: new Date(run.createdAt).toISOString(),
         expiresAt: status?.expiresAt ?? null,
+        vcpus: status?.vcpus ?? null,
       });
     }
 

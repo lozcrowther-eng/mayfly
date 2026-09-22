@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { listLiveInstances, listRecentFailures } from "@/lib/api/run-lookup";
-import { getChallenge } from "@/lib/fixtures/challenges";
 import { estimateCost } from "@/lib/pricing";
 
 const DEFAULT_GLOBAL_CONCURRENCY_CAP = 8;
@@ -13,7 +12,12 @@ export async function GET() {
   const now = Date.now();
 
   const rows = liveRows.map((row) => {
-    const vcpus = row.challengeId ? getChallenge(row.challengeId)?.vcpus ?? 0 : 0;
+    // vcpus is resolved once at launch time (lib/api/launch.ts, for both the fixture and
+    // caller-supplied-config path) and published by the workflow (see PublishedStatus) --
+    // not re-derived here by looking challengeId up in lib/fixtures/challenges.ts, which
+    // has no entry for a CTFd-driven challengeId (just an auto-incrementing integer) and
+    // silently came back 0 for every real launch.
+    const vcpus = row.vcpus ?? 0;
     const elapsedMs = now - new Date(row.createdAt).getTime();
     const cost = estimateCost(vcpus, elapsedMs);
     const ttlRemainingMs = row.expiresAt ? new Date(row.expiresAt).getTime() - now : null;

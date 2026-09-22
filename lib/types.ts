@@ -62,6 +62,14 @@ export interface PublishedStatus {
   teamId: string;
   state: InstanceState;
   url: string | null;
+  /**
+   * Resolved once in lib/api/launch.ts for both the fixture and the caller-supplied-config
+   * path (see LaunchInput.vcpus) — published here so /admin's cost estimate doesn't need its
+   * own second resolution. A challengeId supplied by CTFd is just an auto-incrementing
+   * integer with no lib/fixtures/challenges.ts entry to look up, so re-deriving vcpus from
+   * challengeId there (the previous approach) silently came back 0 for every real launch.
+   */
+  vcpus?: number;
   /** Populated only on "failed", from the sandbox's own log file — see triageFailure. */
   logs?: string;
   /** ISO 8601 — when the current active window ends and the workflow re-enters "expiring". Set on "healthy"/"expiring", null otherwise. */

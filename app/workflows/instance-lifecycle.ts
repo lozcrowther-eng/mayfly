@@ -58,6 +58,7 @@ async function publishStatus(
     teamId: request.teamId,
     state,
     url,
+    vcpus: request.vcpus,
     logs: opts?.logs,
     expiresAt: opts?.expiresAt ?? null,
     triage: opts?.triage,
