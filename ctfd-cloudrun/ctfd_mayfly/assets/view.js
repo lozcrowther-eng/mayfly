@@ -43,9 +43,34 @@ CTFd._internal.challenge.preRender = function () {};
     }
   }
 
-  function panelHtml() {
+  /**
+   * A silent failure anywhere in this file (an exception, a swallowed .catch()) has been
+   * the shape of every bug in this plugin so far -- "sometimes nothing renders" with nothing
+   * in the UI to say why. This surfaces it directly in the panel's own spot, visible in
+   * whatever the player/tester is already looking at, instead of only in a devtools console
+   * that may not be open.
+   */
+  function showPanelError(context, err) {
+    console.error("[mayfly] " + context, err);
+    var root = modalRoot();
+    if (!root) return;
+    var existing = root.querySelector("#mayfly-error");
+    if (existing) existing.remove();
+    var anchor = root.querySelector(".submit-row, #challenge-input, #challenge");
+    if (!anchor) return;
+    var div = document.createElement("div");
+    div.id = "mayfly-error";
+    div.className = "alert alert-danger text-start mb-3";
+    div.textContent = "[mayfly] " + context + ": " + (err && err.message ? err.message : err);
+    if (anchor.parentNode) anchor.parentNode.insertBefore(div, anchor);
+    else anchor.insertBefore(div, anchor.firstChild);
+  }
+
+  function panelHtml(challengeId) {
     return (
-      '<div id="mayfly-panel" class="mayfly-panel text-center mb-3">' +
+      '<div id="mayfly-panel" class="mayfly-panel text-center mb-3" data-challenge-id="' +
+      challengeId +
+      '">' +
       '  <div id="mayfly-launch-row">' +
       '    <button id="mayfly-launch-btn" type="button" class="btn btn-primary">Launch</button>' +
       "  </div>" +
@@ -77,6 +102,9 @@ CTFd._internal.challenge.preRender = function () {};
   function renderState(data) {
     var stateEl = qs("#mayfly-state");
     if (!stateEl) return; // modal was closed mid-poll
+
+    var errEl = qs("#mayfly-error");
+    if (errEl) errEl.remove(); // a later successful render clears a transient earlier failure
 
     var launchRow = qs("#mayfly-launch-row");
     var statusRow = qs("#mayfly-status-row");
@@ -143,8 +171,8 @@ CTFd._internal.challenge.preRender = function () {};
         return res.json();
       })
       .then(renderState)
-      .catch(function () {
-        // A transient fetch failure isn't a terminal state -- the next poll just retries.
+      .catch(function (err) {
+        showPanelError("status poll failed", err);
       });
   }
 
@@ -216,11 +244,36 @@ CTFd._internal.challenge.preRender = function () {};
     return null;
   }
 
+  /**
+   * The theme's own modal container (#challenge-window) isn't guaranteed to be fully torn
+   * down and rebuilt between two different challenges of this same type -- a leftover
+   * #mayfly-panel from whichever challenge was open before this one satisfies a plain
+   * existence check and blocks a fresh panel from ever being injected for the new one
+   * (confirmed: this is exactly what "sometimes no Launch button" turned out to be). Tag the
+   * panel with the challenge id it belongs to and compare, instead of just checking whether
+   * *a* panel exists at all.
+   */
+  function removeStalePanel() {
+    var existing = qs("#mayfly-panel");
+    if (!existing) return;
+
+    var challengeIdField = qs("#challenge-id");
+    var currentChallengeId = challengeIdField ? challengeIdField.value : null;
+    if (existing.getAttribute("data-challenge-id") === currentChallengeId) return; // still current
+
+    stopPolling();
+    currentRunId = null;
+    existing.remove();
+  }
+
   function insertPanel(anchor) {
-    console.log("[mayfly] injecting Launch panel before " + anchor.selector);
+    var challengeIdField = qs("#challenge-id");
+    var challengeId = challengeIdField ? challengeIdField.value : "";
+
+    console.log("[mayfly] injecting Launch panel before " + anchor.selector + " (challenge " + challengeId + ")");
 
     var wrapper = document.createElement("div");
-    wrapper.innerHTML = panelHtml();
+    wrapper.innerHTML = panelHtml(challengeId);
     var panel = wrapper.firstChild;
 
     if (anchor.selector === "#challenge") {
@@ -234,8 +287,25 @@ CTFd._internal.challenge.preRender = function () {};
     wirePanelEvents();
   }
 
+  function currentChallengeId() {
+    var field = qs("#challenge-id");
+    return field ? parseInt(field.value, 10) : null;
+  }
+
   function injectPanel() {
-    if (qs("#mayfly-panel")) return; // already injected from a previous open
+    removeStalePanel();
+    if (qs("#mayfly-panel")) {
+      // Already injected and current -- but "current" only means it belongs to this
+      // challenge, not that it's showing this challenge's latest state. A panel that
+      // survived from an earlier open of the SAME challenge (Alpine didn't tear
+      // #challenge-window down between opens) never gets recreated, so wirePanelEvents()
+      // -- and the resumeIfLive() call inside it -- never runs again on this open. Re-check
+      // here unconditionally instead of only at panel-creation time, which is what made a
+      // hard refresh (the one path that's guaranteed to force a fresh panel) look like the
+      // fix when it was really just the only path still calling resumeIfLive() at all.
+      resumeIfLive(currentChallengeId());
+      return;
+    }
 
     var immediate = findAnchor();
     if (immediate) {
@@ -258,7 +328,9 @@ CTFd._internal.challenge.preRender = function () {};
     }, INJECT_TIMEOUT_MS);
 
     var observer = new MutationObserver(function () {
-      if (timedOut || qs("#mayfly-panel")) return;
+      if (timedOut) return;
+      removeStalePanel();
+      if (qs("#mayfly-panel")) return;
       var anchor = findAnchor();
       if (!anchor) return;
       clearTimeout(timeoutId);
@@ -269,8 +341,7 @@ CTFd._internal.challenge.preRender = function () {};
   }
 
   function wirePanelEvents() {
-    var challengeIdField = qs("#challenge-id");
-    var challengeId = challengeIdField ? parseInt(challengeIdField.value, 10) : null;
+    var challengeId = currentChallengeId();
 
     qs("#mayfly-launch-btn").addEventListener("click", function () {
       launch(challengeId);
@@ -297,14 +368,89 @@ CTFd._internal.challenge.preRender = function () {};
       stopPolling();
     });
 
-    // No "resume polling for an already-live instance on reopen" yet -- the launch
-    // endpoint's own idempotency (api.py) already covers the common case: clicking Launch
-    // again just returns the same live run_id instead of a second sandbox.
+    resumeIfLive(challengeId);
+  }
+
+  /**
+   * currentRunId only ever lived in this closure's in-memory state -- closing the modal (or
+   * a hard refresh) throws that away, and the panel defaulted back to showing the Launch
+   * button even though the instance itself was never actually stopped and is sitting fine
+   * server-side the whole time. /current is a read-only lookup (never provisions anything,
+   * unlike /launch) for exactly this: reopening a challenge with a live instance should
+   * resume showing its status/URL immediately, not require clicking Launch again just to
+   * rediscover it via launch()'s own idempotent return.
+   */
+  function resumeIfLive(challengeId) {
+    fetch("/plugins/ctfd_mayfly/current?challenge_id=" + encodeURIComponent(challengeId), {
+      credentials: "same-origin",
+    })
+      .then(function (res) {
+        return res.json();
+      })
+      .then(function (data) {
+        if (data.run_id) startPolling(data.run_id);
+      })
+      .catch(function (err) {
+        showPanelError("resume-check failed", err);
+      });
   }
 
   CTFd._internal.challenge.postRender = function () {
-    injectPanel();
+    try {
+      injectPanel();
+    } catch (err) {
+      showPanelError("postRender threw", err);
+    }
   };
+
+  /**
+   * postRender only fires when CTFd actually re-runs its challenge-load pipeline (fetch +
+   * script (re)load) -- confirmed (via a real browser, not guessing) that reopening the SAME
+   * challenge you just closed skips that pipeline entirely, since the id hasn't changed. But
+   * the modal's content still gets wiped and reapplied via Alpine's x-html binding on every
+   * open, which erases our injected panel (never part of that HTML string) with nothing left
+   * to reinject it -- postRender simply never runs again to do so. #challenge-window itself
+   * is the one stable, persistent element across every challenge switch (only its innerHTML
+   * changes), so listening for Bootstrap's own "shown.bs.modal"/"hidden.bs.modal" events on
+   * it -- which fire on every open/close regardless of whether CTFd's own pipeline ran -- are
+   * hooks that don't depend on that pipeline at all.
+   *
+   * A first version of this guarded against re-binding with a DOM-attribute flag, on the
+   * assumption "bind once" was enough. It wasn't: each genuine reload runs this whole file
+   * fresh, creating a BRAND NEW closure with its own injectPanel/currentRunId/pollTimer -- but
+   * the flag left the FIRST closure's listener permanently bound, since no later execution
+   * ever got to add its own. Opening a second, different challenge fired that stale listener,
+   * whose stale-but-still-live pollTimer got redirected onto the new challenge's run and then
+   * kept ticking after that challenge's modal closed -- a zombie poller that went on
+   * overwriting whatever challenge was open next with the wrong run's state/URL (confirmed:
+   * this is exactly "both challenges point to the same sandbox URL"). Storing the current
+   * handlers on the element itself (not a module-load flag) lets each fresh execution remove
+   * the previous closure's listeners before adding its own, and hidden.bs.modal now stops
+   * polling on close so a closed challenge never has a live timer left to redirect.
+   */
+  var challengeWindowEl = document.getElementById("challenge-window");
+  if (challengeWindowEl) {
+    var previousShown = challengeWindowEl.__mayflyShownHandler;
+    if (previousShown) challengeWindowEl.removeEventListener("shown.bs.modal", previousShown);
+    var previousHidden = challengeWindowEl.__mayflyHiddenHandler;
+    if (previousHidden) challengeWindowEl.removeEventListener("hidden.bs.modal", previousHidden);
+
+    var shownHandler = function () {
+      try {
+        injectPanel();
+      } catch (err) {
+        showPanelError("shown.bs.modal handler threw", err);
+      }
+    };
+    var hiddenHandler = function () {
+      stopPolling();
+    };
+
+    challengeWindowEl.__mayflyShownHandler = shownHandler;
+    challengeWindowEl.__mayflyHiddenHandler = hiddenHandler;
+    challengeWindowEl.addEventListener("shown.bs.modal", shownHandler);
+    challengeWindowEl.addEventListener("hidden.bs.modal", hiddenHandler);
+  }
 
   /**
    * The "N Solves" tab (.challenge-solves in the base challenge.html) is rendered once via

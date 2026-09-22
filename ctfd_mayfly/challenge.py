@@ -5,6 +5,7 @@ team submits the same answer to. See models.py for why MayflyInstance exists at 
 CTFd's Flags table is per-challenge, not per-team, so it can't express that.
 """
 import hmac
+import os
 
 from flask import Blueprint, current_app
 
@@ -36,6 +37,24 @@ class MayflyChallengeModel(Challenges):
     start_command = db.Column(db.String(255), nullable=True)
 
 
+# A challenge's view script is re-fetched by CTFd core on every modal open (it removes and
+# re-appends the <script> tag each time -- confirmed in the theme's own bundle), but browsers
+# routinely skip re-executing a <script src> that already loaded successfully once on the
+# page, regardless of Cache-Control -- caught this after "the Launch button doesn't appear
+# until a hard refresh" turned out to be exactly that. A query-string suffix that changes
+# whenever the file's contents change forces a genuinely new URL, and therefore a real
+# fetch, without needing a manual version bump per release -- the route match is on path
+# only, so the query string has no effect on which file Flask actually serves.
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+
+
+def _asset_version(filename: str) -> str:
+    try:
+        return str(int(os.path.getmtime(os.path.join(_ASSETS_DIR, filename))))
+    except OSError:
+        return "0"
+
+
 def _current_live_instance(owner_id: int, challenge_id: int):
     return (
         MayflyInstance.query.filter_by(owner_id=owner_id, challenge_id=challenge_id)
@@ -54,9 +73,9 @@ class MayflyChallenge(BaseChallenge):
         "view": "/plugins/ctfd_mayfly/assets/view.html",
     }
     scripts = {
-        "create": "/plugins/ctfd_mayfly/assets/create.js",
-        "update": "/plugins/ctfd_mayfly/assets/update.js",
-        "view": "/plugins/ctfd_mayfly/assets/view.js",
+        "create": f"/plugins/ctfd_mayfly/assets/create.js?v={_asset_version('create.js')}",
+        "update": f"/plugins/ctfd_mayfly/assets/update.js?v={_asset_version('update.js')}",
+        "view": f"/plugins/ctfd_mayfly/assets/view.js?v={_asset_version('view.js')}",
     }
     # Route at which files are accessible — registered via register_plugin_assets_directory()
     # in __init__.py's load(app), matching every bundled CTFd challenge type's own convention.

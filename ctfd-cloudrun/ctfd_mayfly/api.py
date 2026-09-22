@@ -113,6 +113,30 @@ def launch():
     return jsonify(_instance_json(instance))
 
 
+@player_bp.route("/current", methods=["GET"])
+@authed_only
+def current():
+    """Read-only lookup for "is there already a live instance for me on this challenge" --
+    unlike launch(), never creates one. Lets the frontend resume showing status/URL when a
+    challenge is reopened, instead of the panel defaulting back to the Launch button and the
+    player having to click it again just to rediscover an instance that was never actually
+    lost (it's sitting fine in this table the whole time -- the browser just never re-asked
+    for it, since currentRunId only ever lived in an in-memory JS closure)."""
+    challenge_id = request.args.get("challenge_id")
+    if not challenge_id:
+        return jsonify({"error": "challenge_id is required"}), 400
+
+    owner_id = resolve_owner_id()
+    if owner_id is None:
+        return jsonify({"error": "not authenticated"}), 403
+
+    instance = _current_live_instance(owner_id, challenge_id)
+    if instance is None:
+        return jsonify({"run_id": None})
+
+    return jsonify(_instance_json(instance))
+
+
 @player_bp.route("/status", methods=["GET"])
 @authed_only
 def status():
