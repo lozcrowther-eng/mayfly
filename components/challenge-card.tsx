@@ -54,11 +54,21 @@ export function ChallengeCard({ challenge, teamId }: { challenge: Challenge; tea
 
   const pollOnce = useCallback(async (runId: string) => {
     const response = await fetch(`/api/instances/${runId}`);
+    if (response.status === 404) {
+      // The tracked run no longer exists — most commonly a dev server restart wiping its
+      // in-memory workflow state, but also a genuinely deleted run. Unlike a transient
+      // error, this state can never resolve on a later poll, so there's nothing to keep
+      // retrying: forget it and fall back to Launch instead of polling a dead runId forever.
+      stopPolling();
+      setTracked(null);
+      setStatus(null);
+      return;
+    }
     if (!response.ok) return;
     const data = (await response.json()) as PolledInstance;
     setStatus(data);
     if (TERMINAL_STATES.includes(data.state)) stopPolling();
-  }, [stopPolling]);
+  }, [stopPolling, setTracked]);
 
   // Subscribes to (and polls) whichever run is currently tracked for this team+challenge —
   // switches teams or challenges cleanly because the effect keys off runId, the one
