@@ -117,8 +117,15 @@ export class RealCtfdClient implements CtfdClient {
   // plugin (plan §8) — GET /api/v1/scoreboard is stock CTFd core, present on any CTFd
   // instance today, so /scoreboard can hit it for real right now.
   async getScoreboard(): Promise<ScoreboardEntry[]> {
+    // CTFd's token auth is "Authorization: Token <token>", not "Bearer" -- and on a GET it
+    // only recognizes the token at all when Content-Type: application/json is also set,
+    // otherwise it silently falls through to session-only auth and 302s to /login instead
+    // of erroring (confirmed directly against a real CTFd instance).
     const res = await fetch(`${requireCtfdBaseUrl()}/api/v1/scoreboard`, {
-      headers: { Authorization: `Bearer ${requireCtfdApiToken()}` },
+      headers: {
+        Authorization: `Token ${requireCtfdApiToken()}`,
+        "Content-Type": "application/json",
+      },
     });
     if (!res.ok) throw new Error(`CTFd scoreboard request failed: ${res.status}`);
 
