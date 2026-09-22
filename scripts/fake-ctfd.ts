@@ -10,7 +10,10 @@ import { sign } from "../lib/hmac";
  * ever exercises (the demo console's /api/launch is deliberately unsigned — a different
  * trust boundary, see that route's comment).
  */
-const APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3000";
+// Overridable per-invocation via --url (see extractUrlFlag) — a `let`, not a `const`, so
+// main() can point every function below at a deployed URL (preview or production) instead
+// of localhost without duplicating the whole file.
+let APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3000";
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 // 30 min, not 1h — RealSandboxClient adds a 300s grace buffer on top of this (see
@@ -96,6 +99,28 @@ async function pollUntilUrlOrFailed(runId: string): Promise<InstanceStatus> {
   throw new Error("timed out waiting for instance to become healthy");
 }
 
+const TERMINAL_STATES = new Set(["reaped", "failed"]);
+const SOLVE_POLL_TIMEOUT_MS = 15 * 1000;
+
+/**
+ * A correct submission resumes the workflow's hook, but the actual reap (stop/delete the
+ * sandbox, publish the final status) still runs as async workflow steps after that — a
+ * fixed short delay was enough against a local dev server, but not always against a real
+ * deployment, where that chain runs on separate serverless infrastructure with real network
+ * latency (confirmed: a run checked immediately after solving showed "healthy", the same
+ * run checked 5s later showed "reaped"). Poll for the terminal state instead of guessing at
+ * a delay; report whatever it lands on if it times out rather than crashing.
+ */
+async function pollUntilTerminal(runId: string): Promise<InstanceStatus> {
+  const deadline = Date.now() + SOLVE_POLL_TIMEOUT_MS;
+  let status = await getStatus(runId);
+  while (!TERMINAL_STATES.has(status.state) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    status = await getStatus(runId);
+  }
+  return status;
+}
+
 async function submit(challengeId: string, teamId: string, correct: boolean): Promise<void> {
   console.log(`[ctfd plugin] team ${teamId} submits a ${correct ? "correct" : "incorrect"} flag for ${challengeId}`);
   const response = await signedPost("/api/webhooks/ctfd/submission", { challengeId, teamId, correct });
@@ -142,8 +167,8 @@ async function rehearse(challengeId: string, teamId: string, ttlSeconds: number)
   console.log(`  state after incorrect submission: ${(await getStatus(runId)).state}`);
 
   await submit(challengeId, teamId, true);
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-  console.log(`  state after correct submission: ${(await getStatus(runId)).state}`);
+  const afterSolve = await pollUntilTerminal(runId);
+  console.log(`  state after correct submission: ${afterSolve.state}`);
 
   console.log(`\nCheck ${APP_BASE_URL}/scoreboard — ${teamId} should now show points for ${challengeId}.`);
   console.log(`Check ${APP_BASE_URL}/admin — this run should show as solved/reaping.`);
@@ -156,20 +181,55 @@ function usage(): never {
       "submission webhook — so the full lifecycle can be rehearsed before CTFd exists.",
       "",
       "Usage:",
-      "  pnpm fake-ctfd rehearse <challengeId> <teamId> [ttlSeconds]",
+      "  pnpm fake-ctfd rehearse <challengeId> <teamId> [ttlSeconds] [--url <baseUrl>]",
       "      launch -> wait healthy -> submit wrong -> submit correct -> report",
-      "  pnpm fake-ctfd launch <challengeId> <teamId> [ttlSeconds]",
-      "  pnpm fake-ctfd submit <challengeId> <teamId> <correct|incorrect>",
-      "  pnpm fake-ctfd status <runId>",
-      "  pnpm fake-ctfd extend <runId>   # unsigned — mirrors the player browser's Extend button",
-      "  pnpm fake-ctfd stop <runId>     # unsigned — mirrors the player browser's Stop button",
+      "  pnpm fake-ctfd launch <challengeId> <teamId> [ttlSeconds] [--url <baseUrl>]",
+      "  pnpm fake-ctfd submit <challengeId> <teamId> <correct|incorrect> [--url <baseUrl>]",
+      "  pnpm fake-ctfd status <runId> [--url <baseUrl>]",
+      "  pnpm fake-ctfd extend <runId> [--url <baseUrl>]  # unsigned — mirrors the player browser's Extend button",
+      "  pnpm fake-ctfd stop <runId> [--url <baseUrl>]    # unsigned — mirrors the player browser's Stop button",
+      "",
+      "--url points every request at a deployed app instead of localhost — e.g.",
+      "  pnpm fake-ctfd rehearse juice-shop team1 --url https://mayfly-nine.vercel.app",
+      "Same effect as setting APP_BASE_URL, just without having to export it first.",
+      "MAYFLY_SIGNING_SECRET must still match whatever that deployment's own env var is set",
+      "to — this only changes where requests go, not what they're signed with.",
     ].join("\n"),
   );
   process.exit(1);
 }
 
+/**
+ * Pulls `--url <value>` (or `--url=<value>`) out of argv wherever it appears, so it can sit
+ * anywhere on the command line without disturbing each command's positional args.
+ */
+function extractUrlFlag(argv: string[]): { url: string | undefined; rest: string[] } {
+  const rest: string[] = [];
+  let url: string | undefined;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--url") {
+      url = argv[++i];
+      continue;
+    }
+    if (arg.startsWith("--url=")) {
+      url = arg.slice("--url=".length);
+      continue;
+    }
+    rest.push(arg);
+  }
+
+  return { url, rest };
+}
+
 async function main() {
-  const [command, ...args] = process.argv.slice(2);
+  const { url, rest } = extractUrlFlag(process.argv.slice(2));
+  if (url !== undefined) {
+    if (!url) usage(); // "--url" as the last arg with nothing after it
+    APP_BASE_URL = url.replace(/\/+$/, ""); // trailing slash would double up in template strings below
+  }
+  const [command, ...args] = rest;
 
   switch (command) {
     case "rehearse": {
