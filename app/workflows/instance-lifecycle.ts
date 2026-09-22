@@ -1,6 +1,6 @@
 import { FatalError, RetryableError, defineHook, getWorkflowMetadata, getWritable, sleep } from "workflow";
 import { AdmissionDeniedError, admit } from "@/lib/admission";
-import { ctfdClient, sandboxClient } from "@/lib/clients";
+import { getCtfdClient, getSandboxClient } from "@/lib/clients";
 import { EXTEND_SECONDS } from "@/lib/constants";
 import { triageBootFailure } from "@/lib/triage";
 import type { InstanceRequest, InstanceState, LaunchInput, PublishedStatus, PublishedTriage } from "@/lib/types";
@@ -72,12 +72,12 @@ async function publishStatus(
 
 async function mintFlag(request: InstanceRequest): Promise<string> {
   "use step";
-  return ctfdClient.mintFlag(request);
+  return getCtfdClient().mintFlag(request);
 }
 
 async function createSandbox(request: InstanceRequest, flag: string): Promise<string> {
   "use step";
-  const { url } = await sandboxClient.create(request, flag);
+  const { url } = await getSandboxClient().create(request, flag);
   return url;
 }
 
@@ -85,7 +85,7 @@ async function waitForHealthy(request: InstanceRequest): Promise<void> {
   "use step";
 
   try {
-    await sandboxClient.healthUrl(request);
+    await getSandboxClient().healthUrl(request);
   } catch (error) {
     // Boot-time race, not a permanent failure — the step retry policy backs off and tries again.
     // Keep the underlying error's detail (e.g. curl output) instead of a generic message —
@@ -97,7 +97,7 @@ async function waitForHealthy(request: InstanceRequest): Promise<void> {
 
 async function publishReady(request: InstanceRequest, url: string): Promise<void> {
   "use step";
-  await ctfdClient.publishUrl(request, url);
+  await getCtfdClient().publishUrl(request, url);
 }
 
 async function notifyExpiring(request: InstanceRequest): Promise<void> {
@@ -110,7 +110,7 @@ async function notifyExpiring(request: InstanceRequest): Promise<void> {
 /** Moves the sandbox's own clock forward — CLAUDE.md: "On extend, call sandbox.extendTimeout() as well as extending the sleep — move both clocks." */
 async function extendInstance(request: InstanceRequest, extraSeconds: number): Promise<void> {
   "use step";
-  await sandboxClient.extendTimeout(request, extraSeconds);
+  await getSandboxClient().extendTimeout(request, extraSeconds);
 }
 
 /**
@@ -126,7 +126,7 @@ async function extendInstance(request: InstanceRequest, extraSeconds: number): P
  */
 async function captureBootOutput(request: InstanceRequest): Promise<string> {
   "use step";
-  return sandboxClient.readLogs(request).catch(() => "");
+  return getSandboxClient().readLogs(request).catch(() => "");
 }
 
 /**
@@ -139,7 +139,7 @@ async function captureBootOutput(request: InstanceRequest): Promise<string> {
  */
 async function triageHealthCheckFailure(request: InstanceRequest): Promise<{ logs: string; triage: PublishedTriage }> {
   "use step";
-  const logs = await sandboxClient.readLogs(request).catch(() => "");
+  const logs = await getSandboxClient().readLogs(request).catch(() => "");
   const triage = await triageBootFailure(logs);
   return { logs, triage };
 }
@@ -149,8 +149,8 @@ async function reap(request: InstanceRequest): Promise<void> {
 
   // Both fakes are idempotent no-ops for an instance that was never created/minted, so this
   // is always safe to call regardless of how far the workflow got before failing.
-  await sandboxClient.reap(request);
-  await ctfdClient.markReaped(request);
+  await getSandboxClient().reap(request);
+  await getCtfdClient().markReaped(request);
 }
 
 export async function instanceLifecycle(input: LaunchInput): Promise<void> {

@@ -1,7 +1,7 @@
 import { getRun } from "workflow/api";
 import { HookNotFoundError } from "workflow/errors";
 import { hookToken, lifecycleHook } from "@/app/workflows/instance-lifecycle";
-import { ctfdClient, sandboxClient } from "@/lib/clients";
+import { getCtfdClient, getSandboxClient } from "@/lib/clients";
 import { getRunIdentity } from "@/lib/api/run-lookup";
 
 /**
@@ -17,7 +17,7 @@ import { getRunIdentity } from "@/lib/api/run-lookup";
  *    the reap, publishes a final "reaped" status, and completes itself. Nothing else to do.
  * 2. If no hook exists (HookNotFoundError — the narrow race above, or the run is already
  *    terminal), there is no graceful path to fall back on: reap directly
- *    (sandboxClient.reap()/ctfdClient.markReaped() are idempotent no-ops if there's nothing
+ *    (getSandboxClient().reap()/getCtfdClient().markReaped() are idempotent no-ops if there's nothing
  *    to reap, so this is safe even if timed against something else), then cancel the
  *    workflow run so it stops appearing in /admin's "live instances" listing (which reads
  *    world.runs.list({status:'running'})) — otherwise it would keep sleeping in the
@@ -42,8 +42,8 @@ export async function killInstance(runId: string): Promise<boolean> {
   }
 
   const request = { ...identity, ttlSeconds: 0, ports: [] };
-  await sandboxClient.reap(request);
-  await ctfdClient.markReaped(request);
+  await getSandboxClient().reap(request);
+  await getCtfdClient().markReaped(request);
   await getRun(runId).cancel();
 
   return true;

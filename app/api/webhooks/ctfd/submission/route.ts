@@ -4,7 +4,7 @@ import { HookNotFoundError } from "workflow/errors";
 import { hookToken, lifecycleHook } from "@/app/workflows/instance-lifecycle";
 import { SubmissionWebhookSchema } from "@/lib/api/schemas";
 import { findRunningInstance } from "@/lib/api/run-lookup";
-import { ctfdClient } from "@/lib/clients";
+import { getCtfdClient } from "@/lib/clients";
 import { readVerifiedBody, requireSigningSecret, SignedRequestError } from "@/lib/http/signed-request";
 
 export async function POST(request: Request) {
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     // Real mode: a no-op, CTFd already owns this score (see CtfdClient.recordSolve). Fake
     // mode: the only place the fake scoreboard's data comes from. Written before the
     // revalidation below so the next request's cache miss reads the score that caused it.
-    await ctfdClient.recordSolve(challengeId, teamId);
+    await getCtfdClient().recordSolve(challengeId, teamId);
 
     // CTFd knows the challenge and team, not our runId — this reverse lookup exists because
     // "one sandbox per team per challenge" (CLAUDE.md) makes it well-defined.

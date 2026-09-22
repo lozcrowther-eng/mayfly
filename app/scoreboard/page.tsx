@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { cacheLife, cacheTag } from "next/cache";
-import { ctfdClient } from "@/lib/clients";
+import { getCtfdClient } from "@/lib/clients";
 import type { ScoreboardEntry } from "@/lib/ctfd/client";
 
 /**
@@ -80,7 +80,7 @@ async function getScores(): Promise<ScoreboardEntry[]> {
   "use cache";
   cacheTag("scoreboard");
   cacheLife("minutes");
-  return ctfdClient.getScoreboard();
+  return getCtfdClient().getScoreboard();
 }
 
 function ScoreboardSkeleton() {
