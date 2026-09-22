@@ -197,15 +197,16 @@ CTFd._internal.challenge.preRender = function () {};
    * .submit-row is the intended anchor (matches the theme's own challenge.html exactly), but
    * postRender can fire before Alpine has finished painting the modal's body, and different
    * themes may not expose that exact class at all -- so this tries a short list of anchors,
-   * in order, and retries briefly rather than silently no-op-ing the first time nothing
-   * matches (which is exactly what happened the first time this ran: no launch button, no
-   * error, because the single .submit-row lookup came up empty and the function just
-   * returned). console.log calls stay in deliberately -- this is exactly the kind of DOM-
-   * timing problem that's next to impossible to diagnose blind.
+   * in order. A fixed-attempt poll (10 attempts * 150ms = 1.5s) used to back this and gave up
+   * silently past that window -- fine on a fast paint, but "sometimes no Launch button" on a
+   * slower one (a cold Cloud Run instance still loading its own assets, a slow first paint,
+   * etc.), with nothing visible to the player when it happened. A MutationObserver instead
+   * reacts to the anchor actually appearing, with no arbitrary deadline short enough to race
+   * a real render -- INJECT_TIMEOUT_MS is a leak guard (stop observing if the modal is closed
+   * without the anchor ever appearing at all), not the thing doing the waiting.
    */
   var ANCHOR_SELECTORS = [".submit-row", "#challenge-input", "#challenge"];
-  var INJECT_RETRY_MS = 150;
-  var INJECT_MAX_ATTEMPTS = 10;
+  var INJECT_TIMEOUT_MS = 10000;
 
   function findAnchor() {
     for (var i = 0; i < ANCHOR_SELECTORS.length; i++) {
@@ -215,28 +216,8 @@ CTFd._internal.challenge.preRender = function () {};
     return null;
   }
 
-  function injectPanel(attempt) {
-    if (qs("#mayfly-panel")) return; // already injected from a previous open
-
-    var anchor = findAnchor();
-    if (!anchor) {
-      if (attempt >= INJECT_MAX_ATTEMPTS) {
-        console.error(
-          "[mayfly] gave up looking for a place to inject the Launch panel after " +
-            attempt +
-            " attempts -- none of " +
-            ANCHOR_SELECTORS.join(", ") +
-            " were found inside #challenge-window"
-        );
-        return;
-      }
-      setTimeout(function () {
-        injectPanel(attempt + 1);
-      }, INJECT_RETRY_MS);
-      return;
-    }
-
-    console.log("[mayfly] injecting Launch panel before " + anchor.selector + " (attempt " + attempt + ")");
+  function insertPanel(anchor) {
+    console.log("[mayfly] injecting Launch panel before " + anchor.selector);
 
     var wrapper = document.createElement("div");
     wrapper.innerHTML = panelHtml();
@@ -251,6 +232,40 @@ CTFd._internal.challenge.preRender = function () {};
     }
 
     wirePanelEvents();
+  }
+
+  function injectPanel() {
+    if (qs("#mayfly-panel")) return; // already injected from a previous open
+
+    var immediate = findAnchor();
+    if (immediate) {
+      insertPanel(immediate);
+      return;
+    }
+
+    var root = modalRoot() || document.body;
+    var timedOut = false;
+    var timeoutId = setTimeout(function () {
+      timedOut = true;
+      observer.disconnect();
+      console.error(
+        "[mayfly] gave up looking for a place to inject the Launch panel after " +
+          INJECT_TIMEOUT_MS +
+          "ms -- none of " +
+          ANCHOR_SELECTORS.join(", ") +
+          " ever appeared inside #challenge-window"
+      );
+    }, INJECT_TIMEOUT_MS);
+
+    var observer = new MutationObserver(function () {
+      if (timedOut || qs("#mayfly-panel")) return;
+      var anchor = findAnchor();
+      if (!anchor) return;
+      clearTimeout(timeoutId);
+      observer.disconnect();
+      insertPanel(anchor);
+    });
+    observer.observe(root, { childList: true, subtree: true });
   }
 
   function wirePanelEvents() {
@@ -288,7 +303,7 @@ CTFd._internal.challenge.preRender = function () {};
   }
 
   CTFd._internal.challenge.postRender = function () {
-    injectPanel(0);
+    injectPanel();
   };
 
   /**
