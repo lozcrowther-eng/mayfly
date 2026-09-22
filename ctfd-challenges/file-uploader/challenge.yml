@@ -1,0 +1,51 @@
+# Common for all challenges sections
+category: ""
+value: 100
+type: mayfly
+extra:
+  image: file-uploader:latest
+  port: 8000
+  ttl_seconds: 1800
+  vcpus: 1
+
+# Required sections
+name: "File Uploader"
+description: "Try to trick the zip file uploader"
+
+# mayfly challenges have no static flags -- MayflyChallenge.attempt() never queries the
+# Flags table, each team gets a fresh flag_hash minted per instance at launch time.
+
+# Tags are used to classify your challenge with topics. You should provide at
+# least one.
+# Can be removed if unused
+# Accepts strings
+tags:
+  - node.JS
+  - Snyk Code
+
+hints:
+  - {
+    content: "Fork this repo and import into Snyk https://github.com/apj-ctf/file-uploader",
+    cost: 0
+  }
+  - {
+    content: "Theres a vulnerability in the code that lets you upload a zip file with an arbitrary file name.
+            <br>
+            <br>
+             from Snyk Code:: Unsanitized input from an HTTP parameter flows into fs.readFileSync, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to read arbitrary files.",
+    cost: 10
+  }
+  - {
+    content: "Following on from the previous hint, if you put a symlink file into your zip payload you can find the flag!",
+    cost: 50
+  }
+
+
+
+# The state of the challenge.
+# This is visible by default. It takes two values: hidden, visible.
+state: hidden
+
+# Specifies what version of the challenge specification was used.
+# Subject to change until ctfcli v1.0.0
+version: "0.1"
