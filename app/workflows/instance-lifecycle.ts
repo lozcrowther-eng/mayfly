@@ -8,6 +8,7 @@ import type { InstanceRequest, InstanceState, LaunchInput, PublishedStatus, Publ
 const TEAM_CONCURRENCY_CAP = 2;
 const DEFAULT_GLOBAL_CONCURRENCY_CAP = 8;
 const EXPIRING_NOTICE_SECONDS = 300;
+const EXPIRING_GRACE_MS = 5 * 60 * 1000;
 
 export const lifecycleHook = defineHook<{ reason: "solved" | "stopped" | "extend" }>();
 
@@ -215,34 +216,49 @@ export async function instanceLifecycle(input: LaunchInput): Promise<void> {
     // so it survives a page refresh without the client needing its own copy of ttlSeconds.
     let expiresAt = new Date(Date.now() + activeSeconds * 1000).toISOString();
     await publishStatus(request, "healthy", url, { expiresAt });
-    await sleep(activeSeconds * 1000);
 
-    // TTL expiry is the most common exit in practice — players abandon challenge instances
-    // without ever pressing "Stop," so most runs fall through this loop via the sleep("5
-    // minutes") arm below, not because someone solved, stopped, or extended it. Looping
-    // (rather than a single race) is what makes repeated Extends work: each lap grows both
-    // clocks by EXTEND_SECONDS and gives the hook another window to fire in.
+    // The hook is live for the whole healthy period, not only once "expiring" — a player
+    // solving, or an operator killing from /admin, ends the run right away regardless of
+    // how much TTL is left, rather than waiting out whatever happens to remain. TTL expiry
+    // with nobody touching anything is still the most common exit in practice — that's the
+    // `!notifiedExpiring` timeout branch below, the same two-phase shape as before, just
+    // merged into one loop so the hook is never unavailable between phases.
+    let notifiedExpiring = false;
+
     for (;;) {
-      await notifyExpiring(request);
-      await publishStatus(request, "expiring", url, { expiresAt });
-
       const hook = lifecycleHook.create({ token: hookToken(request) });
-      const result = await Promise.race([hook, sleep("5 minutes")]);
+      // Both branches are plain milliseconds (not "5 minutes" as a string literal) so this
+      // ternary stays a single `number` — sleep's overloads don't resolve for a union type.
+      const result = await Promise.race([hook, sleep(notifiedExpiring ? EXPIRING_GRACE_MS : activeSeconds * 1000)]);
       // A single `await hook` does not auto-dispose it (only `for await` iterating to
       // completion, or an explicit dispose(), releases the token) — without this, a stale
       // resume() against this same deterministic token could still succeed after the
       // workflow has already moved past this iteration, silently doing nothing real.
       hook.dispose();
 
-      if (result?.reason !== "extend") break; // solved, stopped, or the 5-minute window lapsed
+      if (result?.reason === "extend") {
+        ttlSeconds += EXTEND_SECONDS;
+        await extendInstance(request, EXTEND_SECONDS); // the sandbox's own clock, moved with the workflow's
+        activeSeconds = Math.max(EXTEND_SECONDS - EXPIRING_NOTICE_SECONDS, 0);
+        expiresAt = new Date(Date.now() + activeSeconds * 1000).toISOString();
+        notifiedExpiring = false;
+        await publishStatus(request, "healthy", url, { expiresAt });
+        continue;
+      }
 
-      ttlSeconds += EXTEND_SECONDS;
-      await extendInstance(request, EXTEND_SECONDS); // the sandbox's own clock, moved with the workflow's
+      if (result) break; // solved or stopped — end the run now, whichever phase it was in
 
-      activeSeconds = Math.max(EXTEND_SECONDS - EXPIRING_NOTICE_SECONDS, 0);
-      expiresAt = new Date(Date.now() + activeSeconds * 1000).toISOString();
-      await publishStatus(request, "healthy", url, { expiresAt });
-      await sleep(activeSeconds * 1000);
+      if (!notifiedExpiring) {
+        // The healthy window ran out with no interaction — enter the renewable grace
+        // period: notify once, then give up to 5 more minutes for a late solve/extend
+        // before the next timeout through here gives up for good.
+        notifiedExpiring = true;
+        await notifyExpiring(request);
+        await publishStatus(request, "expiring", url, { expiresAt });
+        continue;
+      }
+
+      break; // already in the grace period, and it lapsed too — give up
     }
   } catch (error) {
     terminalState = "failed";

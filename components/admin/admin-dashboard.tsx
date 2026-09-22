@@ -62,7 +62,7 @@ export function AdminDashboard() {
       </div>
 
       <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-4">
-        <InstancesTable rows={snapshot?.rows ?? []} onKilled={refresh} />
+        <InstancesTable rows={snapshot?.rows ?? []} loading={snapshot === null} onKilled={refresh} />
       </div>
 
       <RecentFailures failures={snapshot?.failures ?? []} />

@@ -28,7 +28,15 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
-export function InstancesTable({ rows, onKilled }: { rows: AdminRow[]; onKilled: () => void }) {
+export function InstancesTable({
+  rows,
+  loading,
+  onKilled,
+}: {
+  rows: AdminRow[];
+  loading: boolean;
+  onKilled: () => void;
+}) {
   const [killing, setKilling] = useState<string | null>(null);
 
   async function handleKill(runId: string) {
@@ -41,8 +49,17 @@ export function InstancesTable({ rows, onKilled }: { rows: AdminRow[]; onKilled:
     }
   }
 
+  // An empty rows array means two different things: the first poll hasn't resolved yet
+  // (loading — common in dev, where Turbopack lazily compiles this route on its first hit
+  // and can take a couple of seconds) versus a poll that resolved and genuinely found
+  // nothing running. They must render differently, or "still loading" looks identical to
+  // "confirmed empty" and the only way to tell them apart is to guess and refresh the page.
   if (rows.length === 0) {
-    return <p className="py-8 text-center font-mono text-sm text-zinc-500">No live instances.</p>;
+    return (
+      <p className="py-8 text-center font-mono text-sm text-zinc-500">
+        {loading ? "Loading…" : "No live instances."}
+      </p>
+    );
   }
 
   return (

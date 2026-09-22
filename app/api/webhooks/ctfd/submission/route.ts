@@ -38,10 +38,10 @@ export async function POST(request: Request) {
       try {
         await lifecycleHook.resume(hookToken(identity), { reason: "solved" });
       } catch (error) {
-        // The hook only exists once the run reaches its post-TTL expiry window (see
-        // lib/api/resume-lifecycle.ts) — most solves land well before that, so this is the
-        // common case, not a failure. Early termination on solve is an optimization on top
-        // of the normal TTL-driven reap, not something a submission can depend on.
+        // The hook is live for essentially the whole run (see instance-lifecycle.ts), so
+        // this should be rare — a narrow race on the workflow's own loop iteration, or the
+        // run already reaching a terminal state on its own. Either way it's not this
+        // webhook's job to retry: the instance still reaps on its normal TTL regardless.
         if (!(error instanceof HookNotFoundError)) throw error;
       }
     }
