@@ -298,7 +298,40 @@ CTFd._internal.challenge.preRender = function () {};
     return field ? parseInt(field.value, 10) : null;
   }
 
+  /**
+   * This file is only ever requested/executed for a mayfly-type challenge's OWN modal open —
+   * CTFd loads a challenge type's `script` conditionally, per challenge. But the
+   * shown.bs.modal listener below is bound to #challenge-window, the modal element shared by
+   * EVERY challenge regardless of type, and it only gets replaced the next time THIS file
+   * runs again (i.e. the next time a mayfly challenge is opened) -- see that listener's own
+   * comment. Open a standard-type challenge right after a mayfly one and the stale listener
+   * still fires, with nothing to stop it blindly injecting a Launch panel into a challenge
+   * that has no orchestrator-backed instance at all (confirmed: this is exactly the reported
+   * "standard challenge still has a Launch button" bug). CTFd's own theme (challenges.js)
+   * stores the full challenge object -- type included -- in this Alpine store on every load,
+   * independent of which type-specific script is or isn't loaded, so it's a reliable signal
+   * this file can check on every modal open, not just the ones where it happens to reload.
+   */
+  function currentChallengeType() {
+    try {
+      var store = window.Alpine && Alpine.store("challenge");
+      return store && store.data ? store.data.type : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
   function injectPanel() {
+    if (currentChallengeType() !== "mayfly") {
+      var stale = qs("#mayfly-panel");
+      if (stale) {
+        stopPolling();
+        currentRunId = null;
+        stale.remove();
+      }
+      return;
+    }
+
     removeStalePanel();
     if (qs("#mayfly-panel")) {
       // Already injected and current -- but "current" only means it belongs to this
