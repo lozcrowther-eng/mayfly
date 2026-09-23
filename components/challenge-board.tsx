@@ -26,7 +26,10 @@ export function ChallengeBoard({ challenges }: { challenges: Challenge[] }) {
         </label>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {/* items-start, not grid's default stretch — otherwise every card in a row inflates
+          to match its tallest sibling (confirmed: exactly the "other challenges look too
+          big" bug, triggered by the AI triage panel making one card much taller). */}
+      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {challenges.map((challenge) => (
           <ChallengeCard key={challenge.id} challenge={challenge} teamId={teamId} />
         ))}
