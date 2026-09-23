@@ -96,7 +96,7 @@ def launch():
         return jsonify(_instance_json(existing))
 
     try:
-        run_id = OrchestratorClient().launch(
+        launched = OrchestratorClient().launch(
             challenge_id=str(challenge_id),
             team_id=str(owner_id),
             ttl_seconds=challenge.ttl_seconds,
@@ -111,7 +111,11 @@ def launch():
         return jsonify({"error": str(e)}), 502
 
     instance = MayflyInstance(
-        owner_id=owner_id, challenge_id=challenge_id, run_id=run_id, state="queued"
+        owner_id=owner_id,
+        challenge_id=challenge_id,
+        run_id=launched["run_id"],
+        run_token=launched["run_token"],
+        state="queued",
     )
     db.session.add(instance)
     db.session.commit()
@@ -178,7 +182,7 @@ def stop():
         return jsonify({"error": "not found"}), 404
 
     try:
-        OrchestratorClient().stop(run_id)
+        OrchestratorClient().stop(run_id, instance.run_token)
     except OrchestratorRequestError as e:
         return jsonify({"error": str(e)}), 502
 
@@ -200,7 +204,7 @@ def extend():
         return jsonify({"error": "not found"}), 404
 
     try:
-        OrchestratorClient().extend(run_id)
+        OrchestratorClient().extend(run_id, instance.run_token)
     except OrchestratorRequestError as e:
         return jsonify({"error": str(e)}), 502
 
@@ -340,7 +344,7 @@ def admin_kill_instance(run_id):
         return jsonify({"error": "not found"}), 404
 
     try:
-        OrchestratorClient().stop(run_id)
+        OrchestratorClient().stop(run_id, instance.run_token)
     except OrchestratorRequestError as e:
         return jsonify({"error": str(e)}), 502
 

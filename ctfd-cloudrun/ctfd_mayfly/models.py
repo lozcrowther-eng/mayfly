@@ -30,6 +30,11 @@ class MayflyInstance(db.Model):
     )
     # The orchestrator's own workflow run id — the one identifier both sides agree on.
     run_id = db.Column(db.String(64), nullable=False, unique=True)
+    # Opaque capability token the orchestrator mints at launch (see its lib/auth/run-token.ts)
+    # and hands back alongside run_id. This plugin never computes or verifies it -- only
+    # stores and echoes it back on status/stop/extend, which is what lets those routes be
+    # addressed by something stronger than an unguessable run_id alone.
+    run_token = db.Column(db.String(128), nullable=True)
     url = db.Column(db.String(512), nullable=True)
     # queued|provisioning|healthy|expiring|reaped|failed — mirrors the orchestrator's own
     # InstanceState (lib/types.ts) so the two sides never invent divergent vocabularies.

@@ -70,26 +70,28 @@ interface InstanceStatus {
   triage?: unknown;
 }
 
-async function getStatus(runId: string): Promise<InstanceStatus> {
-  const response = await fetch(`${APP_BASE_URL}/api/instances/${runId}`, { headers: VERCEL_BYPASS_HEADERS });
+async function getStatus(runId: string, runToken: string): Promise<InstanceStatus> {
+  const response = await fetch(`${APP_BASE_URL}/api/instances/${runId}`, {
+    headers: { ...VERCEL_BYPASS_HEADERS, "x-mayfly-run-token": runToken },
+  });
   return (await response.json()) as InstanceStatus;
 }
 
-async function launch(challengeId: string, teamId: string, ttlSeconds: number): Promise<string> {
+async function launch(challengeId: string, teamId: string, ttlSeconds: number): Promise<{ runId: string; runToken: string }> {
   console.log(`[ctfd plugin] player clicks Launch on ${challengeId} (team ${teamId}, ttl ${ttlSeconds}s)`);
   const response = await signedPost("/api/instances", { challengeId, teamId, ttlSeconds });
   if (!response.ok) {
     throw new Error(`launch failed: ${response.status} ${await response.text()}`);
   }
-  const { runId } = (await response.json()) as { runId: string };
+  const { runId, runToken } = (await response.json()) as { runId: string; runToken: string };
   console.log(`[ctfd plugin] runId ${runId} returned immediately — launch never blocked on provisioning`);
-  return runId;
+  return { runId, runToken };
 }
 
-async function pollUntilUrlOrFailed(runId: string): Promise<InstanceStatus> {
+async function pollUntilUrlOrFailed(runId: string, runToken: string): Promise<InstanceStatus> {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const status = await getStatus(runId);
+    const status = await getStatus(runId, runToken);
     console.log(`  state: ${status.state}${status.url ? ` (${status.url})` : ""}`);
     // Check the URL, not state === "healthy" — same reasoning as scripts/launch.ts: a short
     // TTL can carry a run past healthy into expiring between two polls.
@@ -111,12 +113,12 @@ const SOLVE_POLL_TIMEOUT_MS = 15 * 1000;
  * run checked 5s later showed "reaped"). Poll for the terminal state instead of guessing at
  * a delay; report whatever it lands on if it times out rather than crashing.
  */
-async function pollUntilTerminal(runId: string): Promise<InstanceStatus> {
+async function pollUntilTerminal(runId: string, runToken: string): Promise<InstanceStatus> {
   const deadline = Date.now() + SOLVE_POLL_TIMEOUT_MS;
-  let status = await getStatus(runId);
+  let status = await getStatus(runId, runToken);
   while (!TERMINAL_STATES.has(status.state) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-    status = await getStatus(runId);
+    status = await getStatus(runId, runToken);
   }
   return status;
 }
@@ -134,27 +136,28 @@ async function submit(challengeId: string, teamId: string, correct: boolean): Pr
   );
 }
 
-// Both below are unsigned — not part of the CTFd plugin's HMAC contract. They mirror the
-// player's browser calling these directly by runId (same trust boundary as /api/launch).
-async function extend(runId: string): Promise<void> {
+// Both below require the runToken from launch() — not part of the CTFd plugin's HMAC
+// contract. They mirror the player's browser calling these directly (same trust boundary as
+// /api/launch): see lib/auth/run-token.ts for why a token replaces "runId alone" here.
+async function extend(runId: string, runToken: string): Promise<void> {
   const response = await fetch(`${APP_BASE_URL}/api/instances/${runId}/extend`, {
     method: "POST",
-    headers: VERCEL_BYPASS_HEADERS,
+    headers: { ...VERCEL_BYPASS_HEADERS, "x-mayfly-run-token": runToken },
   });
   console.log(`[player browser] Extend clicked -> ${response.status} ${await response.text()}`);
 }
 
-async function stop(runId: string): Promise<void> {
+async function stop(runId: string, runToken: string): Promise<void> {
   const response = await fetch(`${APP_BASE_URL}/api/instances/${runId}/stop`, {
     method: "POST",
-    headers: VERCEL_BYPASS_HEADERS,
+    headers: { ...VERCEL_BYPASS_HEADERS, "x-mayfly-run-token": runToken },
   });
   console.log(`[player browser] Stop clicked -> ${response.status} ${await response.text()}`);
 }
 
 async function rehearse(challengeId: string, teamId: string, ttlSeconds: number): Promise<void> {
-  const runId = await launch(challengeId, teamId, ttlSeconds);
-  const launched = await pollUntilUrlOrFailed(runId);
+  const { runId, runToken } = await launch(challengeId, teamId, ttlSeconds);
+  const launched = await pollUntilUrlOrFailed(runId, runToken);
 
   if (!launched.url) {
     console.log(`[ctfd plugin] instance failed to become healthy — triage: ${JSON.stringify(launched.triage)}`);
@@ -164,10 +167,10 @@ async function rehearse(challengeId: string, teamId: string, ttlSeconds: number)
 
   await submit(challengeId, teamId, false);
   await new Promise((resolve) => setTimeout(resolve, 500));
-  console.log(`  state after incorrect submission: ${(await getStatus(runId)).state}`);
+  console.log(`  state after incorrect submission: ${(await getStatus(runId, runToken)).state}`);
 
   await submit(challengeId, teamId, true);
-  const afterSolve = await pollUntilTerminal(runId);
+  const afterSolve = await pollUntilTerminal(runId, runToken);
   console.log(`  state after correct submission: ${afterSolve.state}`);
 
   console.log(`\nCheck ${APP_BASE_URL}/scoreboard — ${teamId} should now show points for ${challengeId}.`);
@@ -185,9 +188,11 @@ function usage(): never {
       "      launch -> wait healthy -> submit wrong -> submit correct -> report",
       "  pnpm fake-ctfd launch <challengeId> <teamId> [ttlSeconds] [--url <baseUrl>]",
       "  pnpm fake-ctfd submit <challengeId> <teamId> <correct|incorrect> [--url <baseUrl>]",
-      "  pnpm fake-ctfd status <runId> [--url <baseUrl>]",
-      "  pnpm fake-ctfd extend <runId> [--url <baseUrl>]  # unsigned — mirrors the player browser's Extend button",
-      "  pnpm fake-ctfd stop <runId> [--url <baseUrl>]    # unsigned — mirrors the player browser's Stop button",
+      "  pnpm fake-ctfd status <runId> <runToken> [--url <baseUrl>]",
+      "  pnpm fake-ctfd extend <runId> <runToken> [--url <baseUrl>]  # mirrors the player browser's Extend button",
+      "  pnpm fake-ctfd stop <runId> <runToken> [--url <baseUrl>]    # mirrors the player browser's Stop button",
+      "runToken is whatever `launch` printed alongside that runId — required on status/extend/stop",
+      "since a bare runId is no longer enough (see lib/auth/run-token.ts).",
       "",
       "--url points every request at a deployed app instead of localhost — e.g.",
       "  pnpm fake-ctfd rehearse juice-shop team1 --url https://mayfly-nine.vercel.app",
@@ -241,8 +246,9 @@ async function main() {
     case "launch": {
       const [challengeId, teamId, ttlArg] = args;
       if (!challengeId || !teamId) usage();
-      const runId = await launch(challengeId, teamId, ttlArg ? Number(ttlArg) : DEFAULT_TTL_SECONDS);
-      const status = await pollUntilUrlOrFailed(runId);
+      const { runId, runToken } = await launch(challengeId, teamId, ttlArg ? Number(ttlArg) : DEFAULT_TTL_SECONDS);
+      console.log(`runToken: ${runToken}`);
+      const status = await pollUntilUrlOrFailed(runId, runToken);
       console.log(status.url ? `Instance URL: ${status.url}` : `Instance failed: ${JSON.stringify(status.triage)}`);
       return;
     }
@@ -253,21 +259,21 @@ async function main() {
       return;
     }
     case "status": {
-      const [runId] = args;
-      if (!runId) usage();
-      console.log(await getStatus(runId));
+      const [runId, runToken] = args;
+      if (!runId || !runToken) usage();
+      console.log(await getStatus(runId, runToken));
       return;
     }
     case "extend": {
-      const [runId] = args;
-      if (!runId) usage();
-      await extend(runId);
+      const [runId, runToken] = args;
+      if (!runId || !runToken) usage();
+      await extend(runId, runToken);
       return;
     }
     case "stop": {
-      const [runId] = args;
-      if (!runId) usage();
-      await stop(runId);
+      const [runId, runToken] = args;
+      if (!runId || !runToken) usage();
+      await stop(runId, runToken);
       return;
     }
     default:

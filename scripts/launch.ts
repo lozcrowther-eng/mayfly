@@ -62,13 +62,13 @@ async function main() {
     process.exit(1);
   }
 
-  const { runId } = (await launchResponse.json()) as { runId: string };
+  const { runId, runToken } = (await launchResponse.json()) as { runId: string; runToken: string };
   console.log(`runId: ${runId}`);
 
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const statusResponse = await fetch(`${APP_BASE_URL}/api/instances/${runId}`, {
-      headers: VERCEL_BYPASS_HEADERS,
+      headers: { ...VERCEL_BYPASS_HEADERS, "x-mayfly-run-token": runToken },
     });
     const instance = (await statusResponse.json()) as { state: string; url: string | null };
 

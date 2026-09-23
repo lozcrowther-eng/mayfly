@@ -21,8 +21,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { runId } = await launchInstance(parsed.data);
-    return NextResponse.json({ runId });
+    const { runId, runToken } = await launchInstance(parsed.data);
+    return NextResponse.json({ runId, runToken });
   } catch (error) {
     if (error instanceof UnknownChallengeError) {
       return NextResponse.json({ error: error.message }, { status: 400 });

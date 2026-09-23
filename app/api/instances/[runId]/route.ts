@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { getRun } from "workflow/api";
+import { checkRunToken } from "@/lib/api/require-run-token";
 import { getLatestStatus } from "@/lib/api/run-lookup";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ runId: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
+
+  const unauthorized = checkRunToken(request, runId);
+  if (unauthorized) return unauthorized;
 
   const run = getRun(runId);
   if (!(await run.exists)) {

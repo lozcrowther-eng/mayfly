@@ -4,11 +4,12 @@ invariants this mirrors). Two distinct directions, two distinct auth schemes:
 
   - Outbound (this plugin -> the orchestrator): launch is HMAC-signed over the raw request
     body, matching the orchestrator's actual enforced contract (readVerifiedBody() in its
-    lib/http/signed-request.ts) exactly. status/stop/extend are deliberately left unsigned
-    here too -- the orchestrator's own /api/instances/[runId]/{stop,extend} routes are not
-    signature-gated (they're addressed by an unguessable runId, the same trust boundary as
-    its browser-facing /api/launch), so signing them here would imply a security property
-    that doesn't actually exist on the other end.
+    lib/http/signed-request.ts) exactly. status/stop/extend are NOT HMAC-signed -- but they
+    are gated by a per-run capability token (run_token) that launch() gets back alongside
+    run_id and that every later call must echo on the X-Mayfly-Run-Token header (verified by
+    the orchestrator's lib/auth/run-token.ts). This module never computes or checks that
+    token's signature itself -- it's minted and verified entirely on the orchestrator side;
+    here it's just an opaque string to store on MayflyInstance.run_token and pass back.
   - Inbound (the orchestrator -> this plugin's internal API): a plain shared-secret header,
     constant-time compared -- see api.py's `internal_auth_required`. Simpler than a full
     HMAC signature because the orchestrator side only needs to prove it holds the secret,
@@ -140,12 +141,14 @@ class OrchestratorClient:
         port: Optional[int] = None,
         vcpus: Optional[int] = None,
         start_command: Optional[str] = None,
-    ) -> str:
+    ) -> Dict[str, str]:
         """
-        POST /api/instances -> {runId}. The orchestrator returns this immediately without
-        waiting on provisioning (see its CLAUDE.md: a bounded gunicorn worker pool here would
-        exhaust itself if fifty simultaneous launches all blocked on a sandbox boot) -- so
-        this call is fast by design, not by luck. The browser polls status() for the rest.
+        POST /api/instances -> {runId, runToken}. The orchestrator returns this immediately
+        without waiting on provisioning (see its CLAUDE.md: a bounded gunicorn worker pool
+        here would exhaust itself if fifty simultaneous launches all blocked on a sandbox
+        boot) -- so this call is fast by design, not by luck. The browser polls status() for
+        the rest. runToken must be stored (MayflyInstance.run_token) and passed to every
+        later status()/stop()/extend() call for this run_id -- those routes 401 without it.
 
         image/port/vcpus/start_command let the orchestrator provision straight from this
         challenge's own MayflyChallengeModel row instead of needing challenge_id to match one
@@ -174,30 +177,37 @@ class OrchestratorClient:
         response = self._signed_post("/api/instances", payload)
         if not response.ok:
             raise OrchestratorRequestError(response.status_code, response.text)
-        return response.json()["runId"]
+        body = response.json()
+        return {"run_id": body["runId"], "run_token": body["runToken"]}
 
-    def status(self, run_id: str) -> Dict[str, Any]:
-        """GET /api/instances/<run_id> -- unsigned; the run_id itself is the only credential
-        the orchestrator checks here, same as a player's browser polling it directly."""
+    def status(self, run_id: str, run_token: str) -> Dict[str, Any]:
+        """GET /api/instances/<run_id> -- gated by the run_token from launch(), not a
+        signature; see this module's top-of-file comment."""
         response = requests.get(
-            f"{self.base_url}/api/instances/{run_id}", timeout=self.timeout
+            f"{self.base_url}/api/instances/{run_id}",
+            headers={"X-Mayfly-Run-Token": run_token},
+            timeout=self.timeout,
         )
         if not response.ok:
             raise OrchestratorRequestError(response.status_code, response.text)
         return response.json()
 
-    def stop(self, run_id: str) -> None:
-        """POST /api/instances/<run_id>/stop -- unsigned, same reasoning as status()."""
+    def stop(self, run_id: str, run_token: str) -> None:
+        """POST /api/instances/<run_id>/stop -- same run_token gate as status()."""
         response = requests.post(
-            f"{self.base_url}/api/instances/{run_id}/stop", timeout=self.timeout
+            f"{self.base_url}/api/instances/{run_id}/stop",
+            headers={"X-Mayfly-Run-Token": run_token},
+            timeout=self.timeout,
         )
         if not response.ok:
             raise OrchestratorRequestError(response.status_code, response.text)
 
-    def extend(self, run_id: str) -> None:
-        """POST /api/instances/<run_id>/extend -- unsigned, same reasoning as status()."""
+    def extend(self, run_id: str, run_token: str) -> None:
+        """POST /api/instances/<run_id>/extend -- same run_token gate as status()."""
         response = requests.post(
-            f"{self.base_url}/api/instances/{run_id}/extend", timeout=self.timeout
+            f"{self.base_url}/api/instances/{run_id}/extend",
+            headers={"X-Mayfly-Run-Token": run_token},
+            timeout=self.timeout,
         )
         if not response.ok:
             raise OrchestratorRequestError(response.status_code, response.text)

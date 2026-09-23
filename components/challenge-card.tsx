@@ -28,6 +28,7 @@ interface PolledInstance {
 
 interface TrackedLaunch {
   runId: string;
+  runToken: string;
   ttlSeconds: number;
   launchedAt: number;
 }
@@ -52,13 +53,16 @@ export function ChallengeCard({ challenge, teamId }: { challenge: Challenge; tea
     }
   }, []);
 
-  const pollOnce = useCallback(async (runId: string) => {
-    const response = await fetch(`/api/instances/${runId}`);
-    if (response.status === 404) {
-      // The tracked run no longer exists — most commonly a dev server restart wiping its
-      // in-memory workflow state, but also a genuinely deleted run. Unlike a transient
-      // error, this state can never resolve on a later poll, so there's nothing to keep
-      // retrying: forget it and fall back to Launch instead of polling a dead runId forever.
+  const pollOnce = useCallback(async (runId: string, runToken: string) => {
+    const response = await fetch(`/api/instances/${runId}`, {
+      headers: { "x-mayfly-run-token": runToken },
+    });
+    if (response.status === 404 || response.status === 401) {
+      // 404: the tracked run no longer exists (most commonly a dev server restart wiping
+      // its in-memory workflow state). 401: a run tracked from before run tokens existed,
+      // or before a fresh RUN_TOKEN_SECRET was set — its stored token can never verify.
+      // Neither can resolve on a later poll, so there's nothing to keep retrying: forget it
+      // and fall back to Launch instead of polling a dead/unauthorized runId forever.
       stopPolling();
       setTracked(null);
       setStatus(null);
@@ -74,18 +78,19 @@ export function ChallengeCard({ challenge, teamId }: { challenge: Challenge; tea
   // switches teams or challenges cleanly because the effect keys off runId, the one
   // primitive that actually identifies what to poll.
   const runId = tracked?.runId;
+  const runToken = tracked?.runToken;
   useEffect(() => {
     stopPolling();
-    if (!runId) return;
+    if (!runId || !runToken) return;
     // The first poll is scheduled via setTimeout, not called directly, so its setState
     // happens inside a callback rather than synchronously in the effect body.
-    const kickoff = setTimeout(() => void pollOnce(runId), 0);
-    pollRef.current = setInterval(() => void pollOnce(runId), POLL_INTERVAL_MS);
+    const kickoff = setTimeout(() => void pollOnce(runId, runToken), 0);
+    pollRef.current = setInterval(() => void pollOnce(runId, runToken), POLL_INTERVAL_MS);
     return () => {
       clearTimeout(kickoff);
       stopPolling();
     };
-  }, [runId, pollOnce, stopPolling]);
+  }, [runId, runToken, pollOnce, stopPolling]);
 
   const handleLaunch = useCallback(async () => {
     setLaunching(true);
@@ -96,9 +101,9 @@ export function ChallengeCard({ challenge, teamId }: { challenge: Challenge; tea
         body: JSON.stringify({ challengeId: challenge.id, teamId, ttlSeconds: DEFAULT_TTL_SECONDS }),
       });
       if (!response.ok) return;
-      const { runId } = (await response.json()) as { runId: string };
+      const { runId, runToken } = (await response.json()) as { runId: string; runToken: string };
       setStatus(null);
-      setTracked({ runId, ttlSeconds: DEFAULT_TTL_SECONDS, launchedAt: Date.now() });
+      setTracked({ runId, runToken, ttlSeconds: DEFAULT_TTL_SECONDS, launchedAt: Date.now() });
     } finally {
       setLaunching(false);
     }
@@ -108,14 +113,17 @@ export function ChallengeCard({ challenge, teamId }: { challenge: Challenge; tea
     if (!tracked) return;
     setActionPending(action);
     try {
-      const response = await fetch(`/api/instances/${tracked.runId}/${action}`, { method: "POST" });
+      const response = await fetch(`/api/instances/${tracked.runId}/${action}`, {
+        method: "POST",
+        headers: { "x-mayfly-run-token": tracked.runToken },
+      });
       // The workflow grows the countdown target by EXTEND_SECONDS on a successful extend
       // (see instance-lifecycle.ts) — mirror that here so the displayed countdown matches
       // what the server is actually counting down to, not the original launch's deadline.
       if (action === "extend" && response.ok) {
         setTracked({ ...tracked, ttlSeconds: tracked.ttlSeconds + EXTEND_SECONDS });
       }
-      await pollOnce(tracked.runId);
+      await pollOnce(tracked.runId, tracked.runToken);
     } finally {
       setActionPending(null);
     }

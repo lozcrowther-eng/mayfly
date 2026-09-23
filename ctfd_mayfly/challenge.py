@@ -170,7 +170,7 @@ class MayflyChallenge(BaseChallenge):
                 # "the instance-kill side effect timed out" into "your solve looked broken"
                 # (confirmed by hitting this directly: an unreachable orchestrator raised
                 # OrchestratorConfigError here, uncaught, and crashed the whole request).
-                OrchestratorClient().stop(instance.run_id)
+                OrchestratorClient().stop(instance.run_id, instance.run_token)
             except Exception:
                 current_app.logger.exception(
                     "mayfly: failed to stop orchestrator instance %s after solve (owner=%s, challenge=%s) "

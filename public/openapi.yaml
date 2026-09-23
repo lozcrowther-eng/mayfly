@@ -18,25 +18,25 @@ info:
       wouldn't also be readable by anyone who opens devtools, so that boundary simply
       doesn't apply to it the way it does to CTFd.
 
-    Every launch call returns a `runId` immediately, before the sandbox exists — CTFd's own
-    gunicorn worker pool is bounded, and blocking would exhaust it during an event's opening
-    rush. Poll `GET /api/instances/{runId}` for the actual lifecycle.
+    Every launch call returns a `runId` and a `runToken` immediately, before the sandbox
+    exists — CTFd's own gunicorn worker pool is bounded, and blocking would exhaust it during
+    an event's opening rush. Poll `GET /api/instances/{runId}` for the actual lifecycle,
+    presenting `runToken` on every call — see `RunToken` below.
 
-    **Auth summary, endpoint by endpoint** — "unsigned" below does not mean "open to anyone
-    who finds the URL"; it means different things for different routes:
+    **Auth summary, endpoint by endpoint**:
     - `POST /api/launch` and both `/api/admin/*` routes sit behind this deployment's Basic
       Auth (a 401 without credentials) — they're browser-facing, not part of the CTFd
       contract.
     - `POST /api/instances` and `POST /api/webhooks/ctfd/submission` are exempt from Basic
       Auth (CTFd can't answer an interactive login prompt) but are HMAC-signed instead —
       genuinely unforgeable without `MAYFLY_SIGNING_SECRET`.
-    - `GET/POST /api/instances/{runId}[/extend|/stop]` are exempt from Basic Auth **and**
-      unsigned. Their only protection is that `runId` is a long, unguessable string — a
-      leaked runId lets someone check/extend/stop *that one instance*, nothing else (no new
-      launches, no other teams' instances, no CTFd data). This is a deliberate, pre-existing
-      tradeoff (see `ctfd_mayfly/client.py`'s own comment: "unsigned; the run_id itself is
-      the only credential"), not an oversight — but it is weaker than real authentication,
-      and worth knowing if you're deciding how far to trust a leaked runId.
+    - `GET/POST /api/instances/{runId}[/extend|/stop]` are exempt from Basic Auth and are not
+      HMAC-signed (neither the demo console's browser nor CTFd's player-facing browser JS
+      could hold that secret without leaking it to every visitor). Instead they require the
+      `runToken` handed back from whichever launch call created this run — see the
+      `RunToken` security scheme. A leaked `runId` alone is no longer enough to act on an
+      instance; leaking both `runId` and `runToken` together still only exposes *that one
+      instance*, nothing else (no new launches, no other teams' instances, no CTFd data).
   license:
     name: Unlicensed — internal project
 
@@ -68,6 +68,17 @@ components:
         original bytes would make verification flaky. Must be sent alongside the
         `x-mayfly-timestamp` header (see below); requests older than a short clock-skew
         window are rejected even with a valid signature.
+    RunToken:
+      type: apiKey
+      in: header
+      name: x-mayfly-run-token
+      description: |
+        The opaque `runToken` returned by whichever launch call (`POST /api/instances` or
+        `POST /api/launch`) created this run. Minted server-side (HMAC over the runId plus an
+        expiry, using a secret distinct from `MAYFLY_SIGNING_SECRET` — see
+        `lib/auth/run-token.ts`) and never computed by any caller, including CTFd's plugin,
+        which only stores and echoes it back. Required on every
+        `GET/POST /api/instances/{runId}[/extend|/stop]` call for that runId.
   parameters:
     RunId:
       name: runId
@@ -147,11 +158,15 @@ components:
 
     LaunchResponse:
       type: object
-      required: [runId]
+      required: [runId, runToken]
       properties:
         runId:
           type: string
           example: "wrun_01M361RFZ35EHZFEDAF2PMNR79"
+        runToken:
+          type: string
+          description: Present this on every later status/extend/stop call for this runId — see the `RunToken` security scheme.
+          example: "1758620400000.9f2c7a1e4b6d8035..."
 
     InstanceStatus:
       type: object
@@ -356,10 +371,12 @@ paths:
       tags: [Lifecycle]
       summary: Get an instance's current status
       description: |
-        Unsigned — the runId itself (a long, unguessable ULID-style string) is the only
-        credential. Reads the workflow run's own published stream, never the Sandbox API
-        directly (see CLAUDE.md, "the workflow run is the source of truth for instance
-        state").
+        Requires the `runToken` returned at launch (see the `RunToken` security scheme) —
+        the runId alone is not enough. Reads the workflow run's own published stream, never
+        the Sandbox API directly (see CLAUDE.md, "the workflow run is the source of truth
+        for instance state").
+      security:
+        - RunToken: []
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -369,6 +386,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InstanceStatus"
+        "401":
+          description: Missing or invalid runToken.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "404":
           description: No workflow run exists for this runId.
           content:
@@ -381,14 +404,15 @@ paths:
       tags: [Lifecycle]
       summary: Extend an instance's TTL
       description: |
-        Unsigned, same as the status route above — the runId is the only credential, so
-        anyone holding this exact runId can extend this one instance. Resumes the run's
-        lifecycle hook with reason "extend". Grants at most
+        Requires the `runToken` returned at launch (see the `RunToken` security scheme).
+        Resumes the run's lifecycle hook with reason "extend". Grants at most
         `EXTEND_SECONDS` (15 minutes) more, clamped to whatever headroom remains against
         Vercel Sandbox's own platform session cap (45 minutes on Hobby) — never the bare
         request, since asking the Sandbox API for more than the platform allows 400s, and
         previously that 400 propagated as an uncaught failure that tore the whole instance
         down. A grant of 0 (already at the cap) is a silent no-op, not an error.
+      security:
+        - RunToken: []
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -401,6 +425,12 @@ paths:
                 properties:
                   ok:
                     type: boolean
+        "401":
+          description: Missing or invalid runToken.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "404":
           description: No workflow run exists for this runId.
         "409":
@@ -415,10 +445,11 @@ paths:
       tags: [Lifecycle]
       summary: Stop an instance
       description: |
-        Unsigned, same as the status route above — the runId is the only credential, so
-        anyone holding this exact runId can stop this one instance early. Resumes the run's
-        lifecycle hook with reason "stopped", ending the run and reaping the sandbox
-        regardless of remaining TTL.
+        Requires the `runToken` returned at launch (see the `RunToken` security scheme).
+        Resumes the run's lifecycle hook with reason "stopped", ending the run and reaping
+        the sandbox regardless of remaining TTL.
+      security:
+        - RunToken: []
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -431,6 +462,12 @@ paths:
                 properties:
                   ok:
                     type: boolean
+        "401":
+          description: Missing or invalid runToken.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "404":
           description: No workflow run exists for this runId.
         "409":
