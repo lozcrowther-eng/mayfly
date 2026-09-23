@@ -22,7 +22,7 @@ export default async function DebugPage() {
           : `CTFD_MODE is '${ctfdMode ?? "(unset)"}' — the fake CTFd endpoints are inactive.`}
       </p>
 
-      <div className="mt-6 divide-y divide-border rounded-lg border border-border">
+      <div className="mt-6 divide-y divide-border rounded-lg ring-1 ring-border">
         {events.length === 0 && ctfdMode === "fake" && (
           <p className="px-4 py-6 text-sm text-muted-foreground">No calls received yet.</p>
         )}

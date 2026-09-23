@@ -31,7 +31,7 @@ export default function ArchitecturePage() {
         <svg
           viewBox="0 0 960 640"
           role="img"
-          aria-label="Architecture diagram: Google Cloud hosts CTFd, Cloud SQL, Memorystore, and remaining TCP challenges on GKE. Vercel hosts Next.js, Workflows, Sandbox microVMs, and AI Gateway. CTFd sends an HMAC-signed control call to Vercel; Vercel writes back to CTFd over REST; the player connects directly over HTTPS to the sandbox."
+          aria-label="Architecture diagram: Google Cloud hosts CTFd, Cloud SQL, Memorystore, and remaining TCP challenges on GKE. Vercel hosts Next.js, Workflows, Sandbox microVMs, and AI Gateway. The player's browser only ever talks to CTFd -- clicking Launch, submitting flags. CTFd sends an HMAC-signed control call to Vercel; Vercel writes back to CTFd over REST; once CTFd publishes the sandbox URL, the player's browser makes a second, direct HTTPS connection straight to it."
           className="w-full text-zinc-100"
         >
           <defs>
@@ -115,7 +115,25 @@ export default function ArchitecturePage() {
             Zero new stateful systems — state lives in CTFd&apos;s MySQL or the Workflow event log.
           </text>
 
-          {/* (i) CTFd -> Next.js: HMAC-signed control call */}
+          {/* (i) Player -> CTFd: the ONLY surface the player actually sees — loading the
+              challenge page, clicking Launch, submitting flags. CLAUDE.md: "There is no
+              player UI in this repo... CTFd is the only player-facing surface." Drawn
+              solid and bold, same weight as the control-plane arrows, because it's the
+              primary relationship — everything else on this diagram is what happens
+              behind CTFd, not instead of it. */}
+          <path
+            d="M460,54 C380,80 300,90 262,118"
+            fill="none"
+            className="stroke-zinc-100"
+            strokeWidth="2"
+            markerEnd="url(#arrow-solid)"
+          />
+          <rect x="255" y="66" width="150" height="20" rx="4" className="fill-black" />
+          <text x="330" y="80" textAnchor="middle" className="fill-zinc-100 text-[12px] font-medium">
+            (i) player&apos;s browser
+          </text>
+
+          {/* (ii) CTFd -> Next.js: HMAC-signed control call */}
           <path
             d="M400,145 C460,120 500,120 560,150"
             fill="none"
@@ -125,10 +143,10 @@ export default function ArchitecturePage() {
           />
           <rect x="418" y="98" width="205" height="20" rx="4" className="fill-black" />
           <text x="520" y="112" textAnchor="middle" className="fill-zinc-100 text-[12px] font-medium">
-            (i) HMAC-signed control call
+            (ii) HMAC-signed control call
           </text>
 
-          {/* (ii) Workflows -> CTFd: REST write-back (dashed — the reverse direction) */}
+          {/* (iii) Workflows -> CTFd: REST write-back (dashed — the reverse direction) */}
           <path
             d="M560,245 C500,285 460,285 400,175"
             fill="none"
@@ -139,10 +157,15 @@ export default function ArchitecturePage() {
           />
           <rect x="418" y="288" width="185" height="20" rx="4" className="fill-black" />
           <text x="510" y="302" textAnchor="middle" className="fill-zinc-100 text-[12px] font-medium">
-            (ii) CTFd REST write-back
+            (iii) CTFd REST write-back
           </text>
 
-          {/* (iii) Player -> Sandbox microVMs: direct HTTPS, bypassing CTFd and the control plane */}
+          {/* (iv) Player -> Sandbox microVMs: a SECOND, derived connection — only exists
+              once CTFd has published the URL from arrow (iii). The player does hit this
+              endpoint directly (confirmed live, repeatedly, this session: the published
+              sb-xxxx.vercel.run URL opens straight in the browser, no CTFd in that path),
+              but it's downstream of CTFd telling them where to go, not an independent
+              relationship — hence muted/dashed relative to (i)'s solid weight. */}
           <path
             d="M485,54 C660,90 800,140 745,280"
             fill="none"
@@ -153,33 +176,40 @@ export default function ArchitecturePage() {
           />
           <rect x="705" y="180" width="215" height="34" rx="4" className="fill-black" />
           <text x="812" y="194" textAnchor="middle" className="fill-zinc-500 text-[12px] font-medium">
-            (iii) Player&apos;s direct HTTPS
+            (iv) once CTFd shows the URL,
           </text>
           <text x="812" y="209" textAnchor="middle" className="fill-zinc-500 text-[12px] font-medium">
-            connection to the sandbox
+            direct HTTPS to the sandbox
           </text>
         </svg>
 
-        <dl className="grid grid-cols-1 gap-3 border-t border-zinc-800 pt-4 text-sm sm:grid-cols-3">
+        <dl className="grid grid-cols-1 gap-3 border-t border-zinc-800 pt-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <dt className="font-medium text-zinc-100">(i) HMAC-signed control call</dt>
+            <dt className="font-medium text-zinc-100">(i) Player&apos;s browser</dt>
+            <dd className="text-zinc-500">
+              The only surface a player actually uses — loading the challenge page, clicking Launch,
+              submitting flags. Everything else here happens behind CTFd, not instead of it.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-zinc-100">(ii) HMAC-signed control call</dt>
             <dd className="text-zinc-500">
               CTFd&apos;s plugin signs the raw request body and posts it to /api/instances, which starts a
               workflow run and returns a runId immediately — it never blocks on provisioning.
             </dd>
           </div>
           <div>
-            <dt className="font-medium text-zinc-100">(ii) CTFd REST write-back</dt>
+            <dt className="font-medium text-zinc-100">(iii) CTFd REST write-back</dt>
             <dd className="text-zinc-500">
               Workflow steps call back into CTFd&apos;s API to mint the flag, publish the live URL, and mark
               the instance reaped — CTFd stays the system of record throughout.
             </dd>
           </div>
           <div>
-            <dt className="font-medium text-zinc-100">(iii) Direct HTTPS to the sandbox</dt>
+            <dt className="font-medium text-zinc-100">(iv) Direct HTTPS to the sandbox</dt>
             <dd className="text-zinc-500">
-              Once a URL is published, the player&apos;s browser talks straight to the Sandbox microVM.
-              Neither CTFd nor this control plane sits in that path.
+              Once CTFd publishes the URL from (iii), the player&apos;s browser opens it directly — a
+              second, real connection to the Sandbox microVM, downstream of (i), not a replacement for it.
             </dd>
           </div>
         </dl>

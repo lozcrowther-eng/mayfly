@@ -14,7 +14,7 @@ export function RecentFailures({ failures }: { failures: FailureRow[] }) {
   return (
     <div className="flex flex-col gap-2">
       <h2 className="font-mono text-sm tracking-[0.3em] text-zinc-500">RECENT FAILURES</h2>
-      <div className="flex flex-col divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-950/60">
+      <div className="flex flex-col divide-y divide-zinc-800 rounded-lg bg-zinc-950/60 ring-1 ring-zinc-800">
         {failures.map((row) => (
           <div key={row.runId} className="flex flex-col gap-1 px-4 py-3">
             <div className="flex items-center justify-between gap-3">
