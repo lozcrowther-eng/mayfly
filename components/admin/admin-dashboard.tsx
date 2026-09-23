@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CapBanner } from "@/components/admin/cap-banner";
 import { InstancesTable, type AdminRow } from "@/components/admin/instances-table";
@@ -39,6 +40,12 @@ export function AdminDashboard() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-6 py-10">
+      <Link
+        href="/"
+        className="w-fit font-mono text-[11px] tracking-widest text-zinc-500 uppercase transition-colors hover:text-zinc-300"
+      >
+        ← Home
+      </Link>
       <h1 className="font-mono text-sm tracking-[0.3em] text-zinc-500">LIVE INSTANCES</h1>
 
       {snapshot?.capHit && <CapBanner instancesLive={snapshot.instancesLive} globalCap={snapshot.globalCap} />}

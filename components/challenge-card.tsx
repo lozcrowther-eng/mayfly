@@ -151,7 +151,12 @@ export function ChallengeCard({ challenge, teamId }: { challenge: Challenge; tea
   // team switch or an earlier launch) — treat it as absent rather than clearing it in an
   // effect, since that lines up with the same "no synchronous setState in an effect" shape.
   const state = tracked ? status?.state : undefined;
-  const showLaunch = !state || state === "reaped";
+  // "failed" used to be excluded here — once a tracked run reached that state there was no
+  // way back to the Launch button at all (localStorage keeps replaying the same terminal
+  // run forever, confirmed: this is exactly "no launch button anymore, just this error").
+  // Showing both the retry button and the triage panel below it lets a player read the
+  // diagnosis and immediately try again, rather than one replacing the other.
+  const showLaunch = !state || state === "reaped" || state === "failed";
   const showUpAndRunning = state === "healthy" || state === "expiring";
   const showTriage = state === "failed";
 
@@ -164,7 +169,7 @@ export function ChallengeCard({ challenge, teamId }: { challenge: Challenge; tea
 
       {showLaunch && (
         <Button onClick={handleLaunch} disabled={launching} className="mt-2 w-fit">
-          {launching ? "Launching…" : "Launch"}
+          {launching ? "Launching…" : state === "failed" ? "Try Again" : "Launch"}
         </Button>
       )}
 

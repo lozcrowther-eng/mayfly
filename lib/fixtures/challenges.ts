@@ -40,15 +40,25 @@ export interface Challenge {
  */
 export const CHALLENGES: Challenge[] = [
   { id: "juice-shop", name: "OWASP Juice Shop", tier: "instanced", ports: [3000], vcpus: 1, points: 100 },
-  // Deliberately never becomes healthy — exercises the failure path (waitForHealthy's
-  // retries exhausting, reap still firing in `finally`) end to end against the fakes.
-  { id: "broken-web", name: "Broken Web", tier: "instanced", ports: [3000], vcpus: 1, points: 150 },
-  { id: "vuln-api", name: "Vulnerable API", tier: "instanced", ports: [8080], vcpus: 2, compose: true, points: 250 },
-  { id: "static-web", name: "Static Web", tier: "shared", ports: [8080], vcpus: 1, url: "https://static-web.mayfly.example", points: 50 },
   // Real challenge — a Snyk CTF box (directory traversal via an old `st` version). Its
   // /start.sh writes $FLAG over the app's static flag file before starting it, which is
   // what makes the flag actually per-team instead of the same baked-in value every launch.
   { id: "file-explorer", name: "File Explorer", tier: "instanced", ports: [3001], vcpus: 1, points: 40, image: "file-explorer:latest" },
+  // Same real image as above, deliberately misconfigured to demo the AI triage path on
+  // /admin: the app itself boots fine (app.js hardcodes port 3001 when PORT isn't set, and
+  // nothing here sets it — real-client.ts's env only injects FLAG/HOST) — this just health-
+  // checks the wrong port, so waitForHealthy's retries exhaust against a real, genuinely
+  // running sandbox with real boot logs for the AI to actually reason about, rather than a
+  // fake that never started at all.
+  {
+    id: "file-explorer-broken",
+    name: "File Explorer (Broken Demo)",
+    tier: "instanced",
+    ports: [9999],
+    vcpus: 1,
+    points: 40,
+    image: "file-explorer:latest",
+  },
 ];
 
 export function getChallenge(id: string): Challenge | undefined {

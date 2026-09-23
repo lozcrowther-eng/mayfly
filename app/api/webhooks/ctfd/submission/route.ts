@@ -1,4 +1,3 @@
-import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { HookNotFoundError } from "workflow/errors";
 import { hookToken, lifecycleHook } from "@/app/workflows/instance-lifecycle";
@@ -46,15 +45,6 @@ export async function POST(request: Request) {
       }
     }
   }
-
-  // Every submission changes the scoreboard, correct or not. This call happens from a Route
-  // Handler, not a Server Action, so updateTag's synchronous same-request refresh isn't
-  // available here — { expire: 0 } is next.js's documented replacement for that case: it
-  // forces the *next* request to block on a fresh fetch instead of serving stale content
-  // for up to a year (which is what the "max" profile would do). A slight staleness window
-  // would be a fine tradeoff for a real leaderboard; it's wrong for a webhook whose entire
-  // job is "this just changed."
-  revalidateTag("scoreboard", { expire: 0 });
 
   return NextResponse.json({ ok: true });
 }

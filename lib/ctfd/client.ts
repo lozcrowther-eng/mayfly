@@ -98,25 +98,49 @@ async function ctfdInternalRequest(method: string, path: string, body?: unknown)
   }
 }
 
+/**
+ * A CTFd-side 404 here means CTFd never heard of this run — expected and harmless for a
+ * demo-console fixture launch (an arbitrary string challengeId with no CTFd counterpart,
+ * see lib/fixtures/challenges.ts) or a transient CTFd outage, since a real CTFd-launched
+ * run always creates its MayflyInstance row before the orchestrator is ever called (see
+ * ctfd_mayfly/api.py's launch()). These three calls are advisory notifications *to* CTFd,
+ * not something the orchestrator's own job — actually running the sandbox — depends on;
+ * letting one propagate as an uncaught step failure was fatal to the *entire* instance
+ * (confirmed: it turned into a FatalError that tore a genuinely healthy sandbox back down
+ * over nothing worse than "CTFd didn't recognize this run").
+ */
+async function tellCtfd(action: string, call: () => Promise<void>): Promise<void> {
+  try {
+    await call();
+  } catch (error) {
+    console.warn(`[mayfly] CTFd didn't accept the ${action} callback (continuing anyway): ${error instanceof Error ? error.message : error}`);
+  }
+}
+
 /** Talks to the real CTFd plugin's internal API (see ctfd_mayfly/api.py's internal_bp). */
 export class RealCtfdClient implements CtfdClient {
   async mintFlag(request: InstanceRequest): Promise<string> {
     // The orchestrator generates and holds the plaintext (it's the one injecting FLAG into
     // the sandbox); CTFd only ever learns the hash, via the plugin's own internal API — see
     // ctfd_mayfly/challenge.py's attempt(), which compares a submission's digest against
-    // exactly this, never a plaintext round-trip.
+    // exactly this, never a plaintext round-trip. Generated locally regardless of whether
+    // CTFd accepts it below — the sandbox still needs a real flag injected either way.
     const flag = `mayfly{${randomBytes(16).toString("hex")}}`;
     const flagHash = createHash("sha256").update(flag, "utf8").digest("hex");
-    await ctfdInternalRequest("POST", `/instances/${request.runId}/flag`, { flag_hash: flagHash });
+    await tellCtfd("mint-flag", () =>
+      ctfdInternalRequest("POST", `/instances/${request.runId}/flag`, { flag_hash: flagHash }),
+    );
     return flag;
   }
 
   async publishUrl(request: InstanceRequest, url: string, expiresAt: string | null): Promise<void> {
-    await ctfdInternalRequest("PATCH", `/instances/${request.runId}`, { url, state: "healthy", expires_at: expiresAt });
+    await tellCtfd("publish-url", () =>
+      ctfdInternalRequest("PATCH", `/instances/${request.runId}`, { url, state: "healthy", expires_at: expiresAt }),
+    );
   }
 
   async markReaped(request: InstanceRequest): Promise<void> {
-    await ctfdInternalRequest("POST", `/instances/${request.runId}/reaped`);
+    await tellCtfd("mark-reaped", () => ctfdInternalRequest("POST", `/instances/${request.runId}/reaped`));
   }
 
   // Unlike mintFlag/publishUrl/markReaped, this doesn't wait on the not-yet-built CTFd
