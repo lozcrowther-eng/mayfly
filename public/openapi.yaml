@@ -1,0 +1,506 @@
+openapi: 3.1.0
+info:
+  title: Mayfly Orchestrator API
+  version: "1.0.0"
+  description: |
+    The control-plane API for provisioning disposable, per-team CTF challenge instances on
+    Vercel Sandbox. This is the Vercel side only — CTFd, its MySQL, and its Redis stay on
+    Google Cloud and are never touched directly by this API (see the project's CLAUDE.md,
+    "the boundary").
+
+    **Two callers, two trust levels:**
+    - The **CTFd plugin** (`ctfd_mayfly`) calls `POST /api/instances` and the submission
+      webhook with an HMAC-SHA256 signature over the raw request body — see the
+      `MayflySignature` security scheme below.
+    - The **demo console** (`/`, a headless test harness standing in for CTFd — see
+      CLAUDE.md, "There is no player UI in this repo") calls the unsigned `POST /api/launch`
+      equivalent directly from the browser. There's no secret a browser could hold that
+      wouldn't also be readable by anyone who opens devtools, so that boundary simply
+      doesn't apply to it the way it does to CTFd.
+
+    Every launch call returns a `runId` immediately, before the sandbox exists — CTFd's own
+    gunicorn worker pool is bounded, and blocking would exhaust it during an event's opening
+    rush. Poll `GET /api/instances/{runId}` for the actual lifecycle.
+  license:
+    name: Unlicensed — internal project
+
+servers:
+  - url: https://mayfly-nine.vercel.app
+    description: Production (Basic Auth required on browser-facing pages; the API routes below are not gated by it)
+
+tags:
+  - name: Launch
+    description: Starting a new instance
+  - name: Lifecycle
+    description: Polling, extending, and stopping a running instance
+  - name: Admin
+    description: Operator dashboard data (backs /admin)
+  - name: Webhooks
+    description: Inbound notifications from CTFd
+
+components:
+  securitySchemes:
+    MayflySignature:
+      type: apiKey
+      in: header
+      name: x-mayfly-signature
+      description: |
+        HMAC-SHA256 over `${timestampMs}.${rawRequestBody}` using the shared
+        `MAYFLY_SIGNING_SECRET`, hex-encoded. Verified against the RAW body bytes (via
+        `request.text()`), never a re-serialized object — `JSON.stringify` and Python's
+        `json.dumps` disagree on whitespace and key order, so signing anything but the
+        original bytes would make verification flaky. Must be sent alongside the
+        `x-mayfly-timestamp` header (see below); requests older than a short clock-skew
+        window are rejected even with a valid signature.
+  parameters:
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+      example: "wrun_01M361RFZ35EHZFEDAF2PMNR79"
+  headers:
+    X-Mayfly-Timestamp:
+      description: Client-side timestamp in epoch milliseconds, the other half of the signed payload (`${timestampMs}.${rawBody}`).
+      schema:
+        type: string
+        example: "1758534000000"
+
+  schemas:
+    InstanceState:
+      type: string
+      enum: [queued, provisioning, healthy, expiring, reaped, failed]
+      description: |
+        Lifecycle state, driven entirely by the durable Workflow run — never polled from the
+        Sandbox API directly. `expiring` is a renewable grace window before `reaped`, not an
+        immediate cutoff; an extend during it resets back to `healthy`.
+
+    Triage:
+      type: object
+      description: Populated only when a health-check exhaustion went through AI triage (see the AI Gateway box on /architecture).
+      properties:
+        cause:
+          type: string
+          example: "The application logs show the server listening on port 3001, but the health check probe is targeting a different port."
+        remediation:
+          type: string
+          example: "Verify the health check configuration targets port 3001, matching the application's listening port."
+        retryable:
+          type: boolean
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+
+    LaunchRequest:
+      type: object
+      required: [challengeId, teamId, ttlSeconds]
+      properties:
+        challengeId:
+          type: string
+          description: >
+            Either a demo-console fixture id (see lib/fixtures/challenges.ts) or an arbitrary
+            caller-owned id — CTFd's plugin passes its own numeric challenge id and supplies
+            image/port/vcpus directly instead, so this never needs to match a fixture.
+          example: "file-explorer"
+        teamId:
+          type: string
+          example: "team-42"
+        ttlSeconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+          description: Active lifetime before the "expiring" grace window begins.
+          example: 1800
+        image:
+          type: string
+          description: A Vercel Container Registry reference. Present when the caller (typically CTFd) already owns its own challenge config instead of relying on a fixture lookup.
+          example: "file-explorer:latest"
+        port:
+          type: integer
+          description: Required when `image` is present.
+          example: 3001
+        vcpus:
+          type: integer
+          example: 1
+        startCommand:
+          type: string
+          description: Overrides the image's own `/start.sh` convention. Rarely needed.
+
+    LaunchResponse:
+      type: object
+      required: [runId]
+      properties:
+        runId:
+          type: string
+          example: "wrun_01M361RFZ35EHZFEDAF2PMNR79"
+
+    InstanceStatus:
+      type: object
+      required: [runId, challengeId, teamId, state, url]
+      properties:
+        runId:
+          type: string
+        challengeId:
+          type: string
+          nullable: true
+        teamId:
+          type: string
+          nullable: true
+        state:
+          $ref: "#/components/schemas/InstanceState"
+        url:
+          type: string
+          format: uri
+          nullable: true
+          description: The live sandbox's public URL. Always null once `state` is `reaped`.
+        logs:
+          type: string
+          nullable: true
+          description: Populated only on `failed` — the sandbox's own captured boot output.
+        triage:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Triage"
+
+    AdminRow:
+      type: object
+      properties:
+        runId:
+          type: string
+        challengeId:
+          type: string
+          nullable: true
+        teamId:
+          type: string
+          nullable: true
+        state:
+          $ref: "#/components/schemas/InstanceState"
+        url:
+          type: string
+          nullable: true
+        vcpus:
+          type: integer
+        elapsedMs:
+          type: integer
+        ttlRemainingMs:
+          type: integer
+          nullable: true
+        cost:
+          type: object
+          properties:
+            cpuHours:
+              type: number
+            cpuCostUsd:
+              type: number
+            memoryCostUsd:
+              type: number
+            totalUsd:
+              type: number
+
+    AdminFailureRow:
+      type: object
+      properties:
+        runId:
+          type: string
+        challengeId:
+          type: string
+          nullable: true
+        teamId:
+          type: string
+          nullable: true
+        failedAt:
+          type: string
+          format: date-time
+        triage:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Triage"
+
+    AdminSnapshot:
+      type: object
+      properties:
+        globalCap:
+          type: integer
+          description: Max concurrent instances (SANDBOX_MAX_CONCURRENT env var, default 8).
+        instancesLive:
+          type: integer
+        totalActiveCpuHours:
+          type: number
+        estimatedSpendUsd:
+          type: number
+        capHit:
+          type: boolean
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminRow"
+        failures:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminFailureRow"
+
+    SubmissionWebhook:
+      type: object
+      required: [challengeId, teamId, correct]
+      properties:
+        challengeId:
+          type: string
+        teamId:
+          type: string
+        correct:
+          type: boolean
+          description: Whether the submitted flag was correct. On true, the matching instance is stopped (its lifecycleHook resumed with reason "solved") if one is currently running.
+
+    Error:
+      type: object
+      properties:
+        error:
+          description: Either a plain message string, or a Zod flatten() validation error object.
+
+paths:
+  /api/instances:
+    post:
+      tags: [Launch]
+      summary: Launch an instance (CTFd's signed contract)
+      description: |
+        The CTFd plugin's launch endpoint — every request must be HMAC-signed (see the
+        `MayflySignature` security scheme). Returns a `runId` immediately; the actual
+        provisioning happens asynchronously in a durable Workflow run. Idempotent from the
+        caller's side only in the sense that CTFd's own plugin resolves "already have a live
+        instance for this owner+challenge" before ever calling this — the orchestrator
+        itself always starts a fresh run per call.
+      security:
+        - MayflySignature: []
+      parameters:
+        - name: x-mayfly-timestamp
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LaunchRequest"
+      responses:
+        "200":
+          description: Launch accepted; a Workflow run has started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LaunchResponse"
+        "400":
+          description: Schema validation failed, or challengeId matched no fixture and no image was supplied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid HMAC signature, or the timestamp is outside the allowed clock-skew window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/launch:
+    post:
+      tags: [Launch]
+      summary: Launch an instance (unsigned, browser-facing demo console)
+      description: |
+        Same request/response contract as `POST /api/instances`, but unsigned — same-origin
+        browser calls from the demo console (`/`) have no secret they could hold without
+        leaking it to every visitor, so the HMAC boundary doesn't apply here. Never call this
+        from CTFd; use the signed endpoint instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LaunchRequest"
+      responses:
+        "200":
+          description: Launch accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LaunchResponse"
+        "400":
+          description: Schema validation failed, or an unknown challengeId with no image supplied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/instances/{runId}:
+    get:
+      tags: [Lifecycle]
+      summary: Get an instance's current status
+      description: |
+        Unsigned — the runId itself (a long, unguessable ULID-style string) is the only
+        credential. Reads the workflow run's own published stream, never the Sandbox API
+        directly (see CLAUDE.md, "the workflow run is the source of truth for instance
+        state").
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Current status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstanceStatus"
+        "404":
+          description: No workflow run exists for this runId.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/instances/{runId}/extend:
+    post:
+      tags: [Lifecycle]
+      summary: Extend an instance's TTL
+      description: |
+        Resumes the run's lifecycle hook with reason "extend". Grants at most
+        `EXTEND_SECONDS` (15 minutes) more, clamped to whatever headroom remains against
+        Vercel Sandbox's own platform session cap (45 minutes on Hobby) — never the bare
+        request, since asking the Sandbox API for more than the platform allows 400s, and
+        previously that 400 propagated as an uncaught failure that tore the whole instance
+        down. A grant of 0 (already at the cap) is a silent no-op, not an error.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Hook resumed (the actual grant, possibly 0, happens inside the workflow — poll status for the new expiry).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "404":
+          description: No workflow run exists for this runId.
+        "409":
+          description: The run exists but isn't currently waiting on its lifecycle hook (e.g. mid-provisioning, or already terminal).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/instances/{runId}/stop:
+    post:
+      tags: [Lifecycle]
+      summary: Stop an instance
+      description: Resumes the run's lifecycle hook with reason "stopped", ending the run and reaping the sandbox regardless of remaining TTL.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Hook resumed; the instance will reap shortly.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "404":
+          description: No workflow run exists for this runId.
+        "409":
+          description: The run exists but isn't currently waiting on its lifecycle hook.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/admin/instances:
+    get:
+      tags: [Admin]
+      summary: Live instances + recent failures snapshot
+      description: Backs the /admin dashboard. Reads live workflow-run state on every request — nothing here is cached.
+      responses:
+        "200":
+          description: Current snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSnapshot"
+
+  /api/admin/instances/{runId}/kill:
+    post:
+      tags: [Admin]
+      summary: Force-kill a live instance from the operator dashboard
+      description: |
+        Resumes the lifecycle hook if the run is waiting on one; otherwise cancels the
+        Workflow run directly (the only way to kill an instance mid-provisioning, before it's
+        ever reached its hook loop).
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Killed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "404":
+          description: No workflow run exists for this runId.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/webhooks/ctfd/submission:
+    post:
+      tags: [Webhooks]
+      summary: CTFd notifies the orchestrator of a flag submission
+      description: |
+        HMAC-signed, same scheme as `POST /api/instances`. On a correct submission, stops the
+        matching live instance (if any) by resuming its lifecycle hook with reason "solved" —
+        a race against the hook's own dispose/create cycle is expected and non-fatal
+        (`HookNotFoundError` is swallowed; the instance still reaps on its normal TTL either
+        way).
+      security:
+        - MayflySignature: []
+      parameters:
+        - name: x-mayfly-timestamp
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmissionWebhook"
+      responses:
+        "200":
+          description: Processed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "400":
+          description: Schema validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid HMAC signature.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"

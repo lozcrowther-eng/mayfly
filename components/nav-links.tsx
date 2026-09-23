@@ -4,6 +4,7 @@ const LINKS = [
   { href: "/", label: "Home" },
   { href: "/admin", label: "Admin" },
   { href: "/architecture", label: "Architecture" },
+  { href: "/api-docs", label: "API Docs" },
 ];
 
 /** Quick jump to this control plane's other ops surfaces — not player-facing navigation. */

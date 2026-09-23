@@ -52,7 +52,7 @@ export default function ArchitecturePage() {
           {/* Google Cloud box */}
           <rect x="40" y="80" width="380" height="470" rx="14" className="fill-transparent stroke-zinc-800" strokeWidth="1.5" strokeDasharray="4 3" />
           <text x="60" y="106" className="fill-zinc-500 text-[13px] font-semibold tracking-wide">
-            GOOGLE CLOUD — existing, system of record
+            GOOGLE CLOUD
           </text>
 
           <rect x="60" y="120" width="340" height="64" rx="8" className="fill-zinc-950/60 stroke-zinc-800" strokeWidth="1.5" />
@@ -81,14 +81,17 @@ export default function ArchitecturePage() {
             on GKE — not everything moves to a microVM
           </text>
 
-          <text x="60" y="530" className="fill-zinc-500 text-[11px]">
+          <text x="60" y="522" className="fill-zinc-500 text-[11px]">
+            Existing — system of record.
+          </text>
+          <text x="60" y="538" className="fill-zinc-500 text-[11px]">
             Owns users, teams, challenges, flags, submissions, scores.
           </text>
 
           {/* Vercel box */}
           <rect x="540" y="80" width="380" height="470" rx="14" className="fill-transparent stroke-zinc-800" strokeWidth="1.5" strokeDasharray="4 3" />
           <text x="560" y="106" className="fill-zinc-500 text-[13px] font-semibold tracking-wide">
-            VERCEL — this repo
+            VERCEL
           </text>
 
           <rect x="560" y="120" width="340" height="60" rx="8" className="fill-zinc-950/60 stroke-zinc-800" strokeWidth="1.5" />
@@ -111,8 +114,11 @@ export default function ArchitecturePage() {
             AI Gateway (triage)
           </text>
 
-          <text x="560" y="530" className="fill-zinc-500 text-[11px]">
-            Zero new stateful systems — state lives in CTFd&apos;s MySQL or the Workflow event log.
+          <text x="560" y="522" className="fill-zinc-500 text-[11px]">
+            This repo. Zero new stateful systems.
+          </text>
+          <text x="560" y="538" className="fill-zinc-500 text-[11px]">
+            State lives in CTFd&apos;s MySQL or the Workflow event log.
           </text>
 
           {/* (i) Player -> CTFd: the ONLY surface the player actually sees — loading the
@@ -128,9 +134,9 @@ export default function ArchitecturePage() {
             strokeWidth="2"
             markerEnd="url(#arrow-solid)"
           />
-          <rect x="255" y="66" width="150" height="20" rx="4" className="fill-black" />
-          <text x="330" y="80" textAnchor="middle" className="fill-zinc-100 text-[12px] font-medium">
-            (i) player&apos;s browser
+          <circle cx="365" cy="79" r="11" className="fill-black stroke-zinc-100" strokeWidth="1.5" />
+          <text x="365" y="83" textAnchor="middle" className="fill-zinc-100 text-[11px] font-mono font-semibold">
+            i
           </text>
 
           {/* (ii) CTFd -> Next.js: HMAC-signed control call */}
@@ -141,9 +147,9 @@ export default function ArchitecturePage() {
             strokeWidth="2"
             markerEnd="url(#arrow-solid)"
           />
-          <rect x="418" y="98" width="205" height="20" rx="4" className="fill-black" />
-          <text x="520" y="112" textAnchor="middle" className="fill-zinc-100 text-[12px] font-medium">
-            (ii) HMAC-signed control call
+          <circle cx="480" cy="125" r="11" className="fill-black stroke-zinc-100" strokeWidth="1.5" />
+          <text x="480" y="129" textAnchor="middle" className="fill-zinc-100 text-[11px] font-mono font-semibold">
+            ii
           </text>
 
           {/* (iii) Workflows -> CTFd: REST write-back (dashed — the reverse direction) */}
@@ -155,9 +161,9 @@ export default function ArchitecturePage() {
             strokeDasharray="6 4"
             markerEnd="url(#arrow-solid)"
           />
-          <rect x="418" y="288" width="185" height="20" rx="4" className="fill-black" />
-          <text x="510" y="302" textAnchor="middle" className="fill-zinc-100 text-[12px] font-medium">
-            (iii) CTFd REST write-back
+          <circle cx="480" cy="273" r="11" className="fill-black stroke-zinc-100" strokeWidth="1.5" />
+          <text x="480" y="277" textAnchor="middle" className="fill-zinc-100 text-[11px] font-mono font-semibold">
+            iii
           </text>
 
           {/* (iv) Player -> Sandbox microVMs: a SECOND, derived connection — only exists
@@ -174,12 +180,9 @@ export default function ArchitecturePage() {
             strokeDasharray="2 3"
             markerEnd="url(#arrow-muted)"
           />
-          <rect x="705" y="180" width="215" height="34" rx="4" className="fill-black" />
-          <text x="812" y="194" textAnchor="middle" className="fill-zinc-500 text-[12px] font-medium">
-            (iv) once CTFd shows the URL,
-          </text>
-          <text x="812" y="209" textAnchor="middle" className="fill-zinc-500 text-[12px] font-medium">
-            direct HTTPS to the sandbox
+          <circle cx="600" cy="73" r="11" className="fill-black stroke-zinc-500" strokeWidth="1.5" />
+          <text x="600" y="77" textAnchor="middle" className="fill-zinc-500 text-[11px] font-mono font-semibold">
+            iv
           </text>
         </svg>
 
