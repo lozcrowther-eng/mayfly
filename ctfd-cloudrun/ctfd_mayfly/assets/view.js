@@ -398,13 +398,29 @@ CTFd._internal.challenge.preRender = function () {};
 
     qs("#mayfly-stop-btn").addEventListener("click", function () {
       if (!currentRunId) return;
+      // Calling stopPolling() right here (the previous version did) killed the poller
+      // before it ever got a chance to see the state actually flip to "reaped" -- which is
+      // the thing that switches the panel back to showing Launch (see renderState's
+      // "reaped" branch, a few lines up). The panel just froze on the old healthy view
+      // until the modal was closed and reopened (confirmed: exactly the reported bug).
+      // Keep polling -- the natural transition to "reaped" stops it itself.
+      var stopBtn = qs("#mayfly-stop-btn");
+      if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.textContent = "Stopping…";
+      }
       fetch("/plugins/ctfd_mayfly/stop", {
         method: "POST",
         credentials: "same-origin",
         headers: csrfHeaders(),
         body: JSON.stringify({ run_id: currentRunId }),
+      }).catch(function (err) {
+        if (stopBtn) {
+          stopBtn.disabled = false;
+          stopBtn.textContent = "Stop";
+        }
+        showPanelError("stop failed", err);
       });
-      stopPolling();
     });
 
     resumeIfLive(challengeId);
