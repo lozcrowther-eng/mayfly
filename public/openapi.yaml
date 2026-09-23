@@ -21,12 +21,28 @@ info:
     Every launch call returns a `runId` immediately, before the sandbox exists — CTFd's own
     gunicorn worker pool is bounded, and blocking would exhaust it during an event's opening
     rush. Poll `GET /api/instances/{runId}` for the actual lifecycle.
+
+    **Auth summary, endpoint by endpoint** — "unsigned" below does not mean "open to anyone
+    who finds the URL"; it means different things for different routes:
+    - `POST /api/launch` and both `/api/admin/*` routes sit behind this deployment's Basic
+      Auth (a 401 without credentials) — they're browser-facing, not part of the CTFd
+      contract.
+    - `POST /api/instances` and `POST /api/webhooks/ctfd/submission` are exempt from Basic
+      Auth (CTFd can't answer an interactive login prompt) but are HMAC-signed instead —
+      genuinely unforgeable without `MAYFLY_SIGNING_SECRET`.
+    - `GET/POST /api/instances/{runId}[/extend|/stop]` are exempt from Basic Auth **and**
+      unsigned. Their only protection is that `runId` is a long, unguessable string — a
+      leaked runId lets someone check/extend/stop *that one instance*, nothing else (no new
+      launches, no other teams' instances, no CTFd data). This is a deliberate, pre-existing
+      tradeoff (see `ctfd_mayfly/client.py`'s own comment: "unsigned; the run_id itself is
+      the only credential"), not an oversight — but it is weaker than real authentication,
+      and worth knowing if you're deciding how far to trust a leaked runId.
   license:
     name: Unlicensed — internal project
 
 servers:
   - url: https://mayfly-nine.vercel.app
-    description: Production (Basic Auth required on browser-facing pages; the API routes below are not gated by it)
+    description: Production — see the auth summary above for exactly which routes Basic Auth does and doesn't cover
 
 tags:
   - name: Launch
@@ -365,7 +381,9 @@ paths:
       tags: [Lifecycle]
       summary: Extend an instance's TTL
       description: |
-        Resumes the run's lifecycle hook with reason "extend". Grants at most
+        Unsigned, same as the status route above — the runId is the only credential, so
+        anyone holding this exact runId can extend this one instance. Resumes the run's
+        lifecycle hook with reason "extend". Grants at most
         `EXTEND_SECONDS` (15 minutes) more, clamped to whatever headroom remains against
         Vercel Sandbox's own platform session cap (45 minutes on Hobby) — never the bare
         request, since asking the Sandbox API for more than the platform allows 400s, and
@@ -396,7 +414,11 @@ paths:
     post:
       tags: [Lifecycle]
       summary: Stop an instance
-      description: Resumes the run's lifecycle hook with reason "stopped", ending the run and reaping the sandbox regardless of remaining TTL.
+      description: |
+        Unsigned, same as the status route above — the runId is the only credential, so
+        anyone holding this exact runId can stop this one instance early. Resumes the run's
+        lifecycle hook with reason "stopped", ending the run and reaping the sandbox
+        regardless of remaining TTL.
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
