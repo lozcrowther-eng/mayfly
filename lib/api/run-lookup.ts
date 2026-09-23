@@ -42,6 +42,14 @@ export async function readLatestStatus(runId: string): Promise<PublishedStatus |
       ),
     ]);
     return (result.value as PublishedStatus | undefined) ?? null;
+  } catch (error) {
+    // A single run whose stored stream data the installed Workflow SDK can't parse (seen in
+    // production: a WorkflowWorldError/ZodError from the API's own /v2/runs response shape)
+    // must not take down every OTHER run's status with it — /admin reads dozens of runs per
+    // request, and an uncaught throw here previously 500'd the entire dashboard over one bad
+    // run. Treat it the same as "nothing published yet": unavailable, not fatal.
+    console.warn(`[mayfly] failed to read status for run ${runId} (treating as unavailable): ${error instanceof Error ? error.message : error}`);
+    return null;
   } finally {
     await reader.cancel().catch(() => {});
   }
@@ -174,19 +182,26 @@ export async function listLiveInstances(): Promise<LiveInstanceRow[]> {
       resolveData: "none",
     });
 
-    for (const run of data) {
-      const status = await readLatestStatus(run.runId);
-      rows.push({
-        runId: run.runId,
-        challengeId: status?.challengeId ?? null,
-        teamId: status?.teamId ?? null,
-        state: status?.state ?? "queued",
-        url: status?.url ?? null,
-        createdAt: new Date(run.createdAt).toISOString(),
-        expiresAt: status?.expiresAt ?? null,
-        vcpus: status?.vcpus ?? null,
-      });
-    }
+    // Reads for the runs in this page are independent of each other — sequential awaits here
+    // meant /admin's total latency scaled with the number of accumulated runs (every read
+    // pays up to READ_TIMEOUT_MS if nothing was published yet). Fanning them out with
+    // Promise.all bounds one page's latency to the slowest single read, not the sum of all.
+    const pageRows = await Promise.all(
+      data.map(async (run) => {
+        const status = await readLatestStatus(run.runId);
+        return {
+          runId: run.runId,
+          challengeId: status?.challengeId ?? null,
+          teamId: status?.teamId ?? null,
+          state: status?.state ?? "queued",
+          url: status?.url ?? null,
+          createdAt: new Date(run.createdAt).toISOString(),
+          expiresAt: status?.expiresAt ?? null,
+          vcpus: status?.vcpus ?? null,
+        } satisfies LiveInstanceRow;
+      }),
+    );
+    rows.push(...pageRows);
 
     if (!next) break;
     cursor = next;
@@ -222,17 +237,19 @@ export async function listRecentFailures(limit = 20): Promise<FailedInstanceRow[
     resolveData: "none",
   });
 
-  const rows: FailedInstanceRow[] = [];
-  for (const run of data) {
-    const status = await readLatestStatus(run.runId);
-    rows.push({
-      runId: run.runId,
-      challengeId: status?.challengeId ?? null,
-      teamId: status?.teamId ?? null,
-      failedAt: new Date(run.completedAt ?? run.updatedAt).toISOString(),
-      triage: status?.triage ?? null,
-    });
-  }
+  // Same fan-out reasoning as listLiveInstances above.
+  const rows = await Promise.all(
+    data.map(async (run) => {
+      const status = await readLatestStatus(run.runId);
+      return {
+        runId: run.runId,
+        challengeId: status?.challengeId ?? null,
+        teamId: status?.teamId ?? null,
+        failedAt: new Date(run.completedAt ?? run.updatedAt).toISOString(),
+        triage: status?.triage ?? null,
+      } satisfies FailedInstanceRow;
+    }),
+  );
 
   return rows;
 }
