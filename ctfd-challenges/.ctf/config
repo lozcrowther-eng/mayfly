@@ -4,3 +4,4 @@ url = https://ctfd-mayfly-1077966652535.australia-southeast1.run.app/
 [challenges]
 file-explorer = file-explorer
 file-uploader = file-uploader
+file-explorer-standard = file-explorer-standard
