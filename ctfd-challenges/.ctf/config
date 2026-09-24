@@ -1,5 +1,5 @@
 [config]
-url = https://ctfd-mayfly-1077966652535.us-east4.run.app/
+url = https://mayfly-ctfd.vercel.app/
 
 [challenges]
 file-explorer = file-explorer

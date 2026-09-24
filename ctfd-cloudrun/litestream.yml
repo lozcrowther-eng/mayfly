@@ -1,6 +1,0 @@
-dbs:
-  - path: /app/db/ctfd.db
-    replicas:
-      - type: gcs
-        bucket: ${GCS_BUCKET}
-        path: ctfd.db

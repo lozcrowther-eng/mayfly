@@ -2,6 +2,8 @@
 Entry point CTFd's plugin loader calls: CTFd.plugins.init_plugins() imports this package and
 calls load(app) for every directory under CTFd/plugins/ (see that function for exactly how).
 """
+import os
+
 import sqlalchemy as sa
 
 from CTFd.models import db
@@ -31,12 +33,24 @@ def _ensure_run_token_column():
 
 
 def load(app):
-    # For SQLite this just calls db.create_all(); for anything else (MySQL in production —
-    # see the orchestrator's CLAUDE.md: "CTFd, its MySQL... stay on GCP") it runs the real
-    # Alembic revision under migrations/, which is why that file exists rather than relying
-    # on db.create_all() alone.
-    upgrade(plugin_name="ctfd_mayfly")
-    _ensure_run_token_column()
+    # SKIP_PLUGIN_MIGRATIONS: both upgrade() and _ensure_run_token_column() open their own
+    # DB connection and run at least one round trip EVERY app boot, unconditionally, even
+    # when there's nothing to do -- fine on Cloud Run (one long-lived pinned instance, boots
+    # rarely) but a real, avoidable cost on a platform where a fresh instance can boot on any
+    # request (see the orchestrator's CLAUDE.md boundary: this repo doesn't dictate that
+    # platform's tradeoffs). An explicit, named opt-out -- never silently skipped -- accepted
+    # for the Vercel demo deployment specifically, whose schema was already fully migrated
+    # via the real Alembic path (Postgres, not SQLite) before this flag was ever set. A future
+    # migration added to either CTFd core or this plugin needs `flask db upgrade` /
+    # `upgrade(plugin_name="ctfd_mayfly")` run manually once while this is set, or this flag
+    # temporarily unset, before it will actually apply.
+    if os.environ.get("SKIP_PLUGIN_MIGRATIONS", "false").lower() != "true":
+        # For SQLite this just calls db.create_all(); for anything else (MySQL in production —
+        # see the orchestrator's CLAUDE.md: "CTFd, its MySQL... stay on GCP") it runs the real
+        # Alembic revision under migrations/, which is why that file exists rather than relying
+        # on db.create_all() alone.
+        upgrade(plugin_name="ctfd_mayfly")
+        _ensure_run_token_column()
 
     CHALLENGE_CLASSES["mayfly"] = MayflyChallenge
     register_plugin_assets_directory(app, base_path="/plugins/ctfd_mayfly/assets/")
