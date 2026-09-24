@@ -239,17 +239,26 @@ export async function listRecentFailures(limit = 20): Promise<FailedInstanceRow[
 
   // Same fan-out reasoning as listLiveInstances above.
   const rows = await Promise.all(
-    data.map(async (run) => {
+    data.map(async (run): Promise<FailedInstanceRow | null> => {
       const status = await readLatestStatus(run.runId);
+      // null means the run's stream couldn't be read at all -- not "nothing published yet"
+      // (that can't happen for a *failed* run; the workflow's own finally block always
+      // publishes a final status before completing) but a genuine, permanent read failure.
+      // Confirmed via the Workflow CLI independently hitting the same schema-validation
+      // error on a batch of pre-existing runs: no challengeId, no teamId, never a triage,
+      // and it will never resolve on a later request either. Showing that as a blank row
+      // forever ("— / — no triage available") reads as a live bug, not what it actually is
+      // -- so it's dropped here rather than rendered as a row with nothing in it.
+      if (!status) return null;
       return {
         runId: run.runId,
-        challengeId: status?.challengeId ?? null,
-        teamId: status?.teamId ?? null,
+        challengeId: status.challengeId,
+        teamId: status.teamId,
         failedAt: new Date(run.completedAt ?? run.updatedAt).toISOString(),
-        triage: status?.triage ?? null,
-      } satisfies FailedInstanceRow;
+        triage: status.triage ?? null,
+      };
     }),
   );
 
-  return rows;
+  return rows.filter((row): row is FailedInstanceRow => row !== null);
 }
